@@ -1,4 +1,4 @@
-﻿import datetime
+import datetime
 import os
 import socket
 import struct
@@ -6,6 +6,7 @@ import threading
 import sys
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote
 from Crypto.Cipher import Blowfish
 
 
@@ -105,7 +106,17 @@ GATE_PORT = 5730
 FRONT_PORT = 1213
 
 # HTTP port used to serve game files.
-HTTP_PORT = 80
+HTTP_PORT = int(os.environ.get("YO3_HTTP_PORT", "80"))
+
+# URL prefixes that map onto GAME_DIR.
+#
+# The client builds two kinds of URLs from yo3.ini:
+#   PatchUpdateUrl + "yo3.idx"      -> the file index
+#   PatchDataUrl   + <idx filename> -> every file listed in the index
+#
+# Both prefixes are served from the same game directory so the ini
+# may point either of them at either path.
+HTTP_PREFIXES = ("/yo3/", "/ygoda/patch/")
 
 
 # Protocol encryption configuration.
@@ -161,6 +172,37 @@ PLAYER_DLV = 1
 # This is sent as a list entry in the login/profile response.
 # Its exact internal meaning depends on the game's protocol.
 EMPTY_ITEM = b"\x03\x00\x00\x00\x00"
+
+
+# ============================================================
+# EXPERIMENT SWITCHES
+# ============================================================
+#
+# Each switch controls one behaviour that differs between builds.
+# They exist so a crash can be traced to a single change by flipping
+# one value at a time. Run the client with yo3_trace.exe to see which
+# step the client reaches.
+#
+# ACCOUNT_IN_LIST_ITEM
+#   True : user_id / uname / dpoint are sent inside the list item of
+#          the 0x2201 reply. This is where the client's handler reads
+#          them (client trace without it: "uid : [0]  uname : []").
+#   False: they are sent at the top level (older behaviour).
+#
+# SELECT_REPLY_WITH_PROFILE
+#   True : the 0x2266 select reply carries the account fields.
+#   False: the 0x2266 select reply is bare.
+#
+# REPLY_TO_1FA4
+#   True : answer the 0x1FA4 trunk-data request with reply 9000.
+#   False: send nothing (the client stays on a black screen).
+#
+# Suggested order: leave the defaults, run, then set REPLY_TO_1FA4 to
+# True and run again.
+
+ACCOUNT_IN_LIST_ITEM = True
+SELECT_REPLY_WITH_PROFILE = False
+REPLY_TO_1FA4 = False
 
 # Multiple client connections may generate log messages
 # simultaneously. A lock prevents their output from
@@ -377,9 +419,9 @@ def t_val(tag, value):
     Encode a length-prefixed text or byte-string value.
 
     Supported tags:
-        7: Text.
-        8: Alternative text representation.
-        9: Raw byte data.
+        7: Text (client reads it as a C string: ends at the first zero byte).
+        8: Binary data (client keeps it by explicit length, zero bytes allowed).
+        9: Text flagged as binary (still read as a C string by the client).
 
     The encoded structure is:
 
@@ -607,6 +649,30 @@ def player_item(name, pindex, player_id, dlv):
         ("team_level", n_val(5, 0)),
         ("team_name", t_val(7, "")),
         ("team_authority", n_val(5, 0)),
+
+        # Appearance data, read by the client's PlayerData loader
+        # (client code at 0x51C260, field "avatar1" with "avatar" as
+        # the fallback name).
+        #
+        # It must be sent as tag 8. The client's packet deserialiser
+        # (code at 0x5344B0) handles the byte-string tags differently:
+        #
+        #   tags 7 and 9 -> read into a C string, which STOPS AT THE
+        #                   FIRST ZERO BYTE (a block of zeros becomes
+        #                   an empty value)
+        #   tag 8        -> kept as a real binary value, copied by its
+        #                   explicit length, so zero bytes survive
+        #
+        # The loader then reads the value as big-endian 16-bit numbers
+        # into an array. If that array is empty, the first routine that
+        # indexes it after a player is selected (reply 0x2266, client
+        # code at 0x46C750) hits the CRT invalid-parameter handler and
+        # the process dies.
+        #
+        # At least 17 entries are needed (the client writes indexes
+        # 0..16). All zeros is a neutral placeholder; the meaning of
+        # each slot (gender, hair, face, colours...) is not mapped yet.
+        ("avatar1", t_val(8, b"\x00" * (17 * 2))),
     ]
 
     # Player entries use tag 3 rather than the top-level
@@ -1001,11 +1067,34 @@ def handle_front_request(conn, count, plain):
     # The additional list entry is part of the observed response
     # structure expected by the client.
     elif request_id == 0x1F48:
-        payload = make_reply(
-            0x2201,
-            PROFILE,
-            [EMPTY_ITEM]
-        )
+        # The client's 0x2201 handler (LoginWindow, client code at
+        # 0x469C00) reads "regulation_id" from the top level of the
+        # packet, but reads user_id, uname and dpoint from the FIRST
+        # LIST ITEM and stores them in its application data. The client
+        # trace shows what happens when they are sent at the top level
+        # instead: "uid : [0]  uname : []".
+        if ACCOUNT_IN_LIST_ITEM:
+            account_item = v_map(
+                [
+                    ("user_id", n_val(5, PROFILE["user_id"])),
+                    ("uname", t_val(7, PROFILE["uname"])),
+                    ("dpoint", n_val(5, PROFILE["dpoint"])),
+                ],
+                tag=3
+            )
+
+            payload = make_reply(
+                0x2201,
+                {"regulation_id": PROFILE["regulation_id"]},
+                [account_item]
+            )
+
+        else:
+            payload = make_reply(
+                0x2201,
+                PROFILE,
+                [EMPTY_ITEM]
+            )
 
         conn.sendall(frame(payload))
         log("[front] sent 0x2201 account profile")
@@ -1037,8 +1126,8 @@ def handle_front_request(conn, count, plain):
         log(
             f"[front] 0x2260 payload {len(payload)} bytes; "
             "player item fields: pname, pindex, player_id, dlv, "
-            "title, n_win, n_lose, team_level, team_name, team_authority "
-            "(BUILD 2: extended player item)"
+            "title, n_win, n_lose, team_level, team_name, team_authority, avatar1 "
+            "(BUILD 4: avatar1 as binary tag 8)"
         )
 
     # --------------------------------------------------------
@@ -1064,13 +1153,58 @@ def handle_front_request(conn, count, plain):
         # Return the account profile using response 0x2266.
         payload = make_reply(
             0x2266,
-            PROFILE
+            PROFILE if SELECT_REPLY_WITH_PROFILE else None
         )
 
         conn.sendall(frame(payload))
 
         log(
-            "[front] sent 0x2266 account profile; "
+            "[front] sent 0x2266 "
+            + ("with account fields" if SELECT_REPLY_WITH_PROFILE else "bare")
+            + f"; player_id={selected_id}"
+        )
+
+    # --------------------------------------------------------
+    # Enter the world: 0x1FA4
+    # --------------------------------------------------------
+    #
+    # Sent by the client's login window right after a valid player
+    # has been selected and accepted (client code at 0x4F3170, called
+    # from the 0x2266 handler).
+    #
+    # The client handles reply 9000 (0x2328) in the same window
+    # (client code in the dispatcher at 0x469C00): it takes the first
+    # list item, loads it into its user-data object at +0x8C8, then
+    # sets the "login finished" flags so the login window can move on
+    # to the next scene.
+    #
+    # An empty item is sent for now. Fields the next scene needs from
+    # that data set are not mapped yet; missing keys read as 0 / empty
+    # in the client, so this is the safest starting point.
+    elif request_id == 0x1FA4:
+        selected_id = fields.get("player_id")
+
+        if selected_id != PLAYER_ID:
+            log(f"[front] 0x1FA4 for unknown player_id {selected_id!r}")
+            return
+
+        if not REPLY_TO_1FA4:
+            log(
+                "[front] 0x1FA4 trunk-data request received; "
+                "REPLY_TO_1FA4 is False, no reply sent"
+            )
+            return
+
+        payload = make_reply(
+            9000,
+            None,
+            [EMPTY_ITEM]
+        )
+
+        conn.sendall(frame(payload))
+
+        log(
+            "[front] sent 9000 (0x2328) world-entry reply; "
             f"player_id={selected_id}"
         )
 
@@ -1415,7 +1549,7 @@ class HTTPHandler(BaseHTTPRequestHandler):
         # /yo3/file.dat?version=1
         # becomes:
         # /yo3/file.dat
-        path = self.path.split("?", 1)[0]
+        path = unquote(self.path.split("?", 1)[0])
 
         log(f"[HTTP] GET {self.path}")
 
@@ -1426,11 +1560,16 @@ class HTTPHandler(BaseHTTPRequestHandler):
         root = os.path.realpath(GAME_DIR)
 
         # Only serve requests inside the /yo3/ namespace.
-        if path.startswith("/yo3/"):
+        prefix = next(
+            (p for p in HTTP_PREFIXES if path.startswith(p)),
+            None
+        )
+
+        if prefix:
 
             # Remove the URL prefix to obtain the relative
             # filename inside the game directory.
-            relative = path[len("/yo3/"):]
+            relative = path[len(prefix):]
 
             # Resolve the requested file to its canonical path.
             full = os.path.realpath(
