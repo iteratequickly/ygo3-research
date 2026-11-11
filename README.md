@@ -10,11 +10,7 @@ An experimental preservation and research project focused on **Yu-Gi-Oh! ONLINE 
 
 This project combines an experimental local private server with a graphical YPK archive extraction tool. The goal is to investigate the original game's network communication, understand its data formats, access its resources, and support further preservation and community development.
 
----
-
 ## Screenshots
-
-### Game Client
 
 ![Yu-Gi-Oh! ONLINE 3](https://raw.githubusercontent.com/iteratequickly/ygo3-research/refs/heads/main/assets/image8.png)
 
