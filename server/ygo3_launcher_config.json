@@ -1,0 +1,17 @@
+{
+  "python_executable": "",
+  "server_script": "",
+  "game_dir": "C:/Program Files (x86)/Konami/Yu-Gi-Oh! ONLINE 3",
+  "ocg_dll": "C:/ProjectIgnis/ocgcore.dll",
+  "card_database": "C:/ProjectIgnis/expansions/cards.cdb",
+  "script_dir": "C:/ProjectIgnis/script",
+  "data_dir": "",
+  "web_dir": "",
+  "host": "127.0.0.1",
+  "front_address": "127.0.0.1",
+  "gate_port": "5730",
+  "front_port": "1213",
+  "duel_port": "1214",
+  "http_port": "80",
+  "user_id": "1001"
+}
