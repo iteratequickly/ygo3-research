@@ -1,6 +1,6 @@
 <div align="center">
 
-# Yu-Gi-Oh! ONLINE 3 — Private Server & YPK Extractor
+# Yu-Gi-Oh! ONLINE 3 — Private Server
 
 **An experimental preservation project for *Yu-Gi-Oh! ONLINE 3: Duel Accelerator***
 
@@ -478,12 +478,7 @@ Extracted resources may support future research and preservation projects, such 
 | Issue | Description |
 |---|---|
 | Eagle selection crash | Selecting Eagle causes the client to crash |
-| Structure Decks | Not visible in the shop |
-| Duel Disks | Not visible in the shop |
 | Special Packs | Not visible in the shop |
-| Roshambo timer | Time is not displayed during the Rock, Paper, Scissors step |
-| Spell cards | Activated Spell cards do not move to the Graveyard as expected |
-| Trap cards | Activated Trap cards do not move to the Graveyard as expected |
 
 These issues remain outstanding and require further investigation.
 
