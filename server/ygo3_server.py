@@ -11,7 +11,7 @@ Layout of this file, top to bottom:
   7. ClientSession (front/gate requests) and DuelSession (the duel port)
   8. server start-up and the command-line tools
 
-Request ids are the client's; replies and pushes use the ids named in comments.
+Request ids are the client's (see protocol.md); replies and pushes use the ids named in comments.
 """
 
 import asyncio
@@ -22,6 +22,14 @@ import mimetypes
 import pickle
 import time
 import sys
+
+# The launcher reads this process's output as UTF-8; the Windows console default (cp1252) cannot print
+# characters such as the model's non-breaking hyphen (U+2011) and made the AI decision fail.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import zlib
 import socket
 import json
@@ -30,6 +38,8 @@ import re
 import secrets
 import sqlite3
 import threading
+import urllib.request
+import urllib.error
 
 from datetime import datetime, timedelta, timezone
 from collections import Counter
@@ -43,29 +53,240 @@ from typing import Optional
 # Logger for everything in this file.
 log = logging.getLogger("yo3.duel_engine")
 
-# --- Paths and launcher configuration -------------------------------------------
+
+# --- Paths, launcher configuration and NPC AI -------------------------------
+
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_FILE = APP_DIR / "ygo3_launcher_config.json"
 
 
 def load_server_config():
-    """Loads settings from the launcher config file."""
+    """Load launcher settings, with environment variables taking priority."""
+
+    data = {}
+
     if CONFIG_FILE.is_file():
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Warning: Failed to parse config: {e}")
-    return {}
+            with CONFIG_FILE.open("r", encoding="utf-8") as f:
+                loaded = json.load(f)
+
+            if isinstance(loaded, dict):
+                data.update(loaded)
+
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"Warning: Failed to load launcher config: {exc}")
+
+    return data
 
 
 config = load_server_config()
 
+
+def config_value(name, default="", env_name=None):
+    """Read a setting from the environment first, then launcher JSON."""
+
+    if env_name and env_name in os.environ:
+        return os.environ[env_name]
+
+    value = config.get(name, default)
+
+    return default if value is None else value
+
+
+def config_bool(name, default=False, env_name=None):
+    """Read a boolean setting."""
+
+    value = config_value(
+        name,
+        str(default),
+        env_name,
+    )
+
+    if isinstance(value, bool):
+        return value
+
+    return str(value).strip().lower() in ("1", "true", "yes", "on", "enabled")
+
+
+def config_int(name, default, env_name=None):
+    """Read and validate an integer setting."""
+
+    value = config_value(
+        name,
+        str(default),
+        env_name,
+    )
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        log.warning(
+            "Invalid configuration value for %s: %r. Using %s.",
+            name,
+            value,
+            default,
+        )
+        return default
+
+
+def config_path(name, default, env_name=None):
+    """Resolve a configured path relative to the server directory."""
+
+    value = config_value(
+        name,
+        str(default),
+        env_name,
+    )
+
+    path = Path(str(value)).expanduser()
+
+    if not path.is_absolute():
+        path = APP_DIR / path
+
+    return path.resolve()
+
+
 PROJECT_DIR = APP_DIR
 
-DEFAULT_DLL = Path(config.get("ocg_dll", APP_DIR / "ocgcore.dll"))
-DEFAULT_DATABASE = Path(config.get("card_database", APP_DIR / "cards.cdb"))
-DEFAULT_SCRIPTS = Path(config.get("script_dir", APP_DIR / "script"))
+
+# ---------------------------------------------------------------------------
+# Server directories and files
+# ---------------------------------------------------------------------------
+
+DEFAULT_DLL = config_path(
+    "ocg_dll",
+    APP_DIR / "ocgcore.dll",
+    "YGO3_DLL_PATH",
+)
+
+DEFAULT_DATABASE = config_path(
+    "card_database",
+    APP_DIR / "cards.cdb",
+    "YGO3_CARD_DB",
+)
+
+DEFAULT_SCRIPTS = config_path(
+    "script_dir",
+    APP_DIR / "script",
+    "YGO3_SCRIPT_DIR",
+)
+
+DATA_DIR = config_path(
+    "data_dir",
+    APP_DIR / "data",
+    "YGO3_DATA_DIR",
+)
+
+WEB_DIR = config_path(
+    "web_dir",
+    APP_DIR / "www",
+    "YGO3_WEB_DIR",
+)
+
+GAME_DIR = config_path(
+    "game_dir",
+    APP_DIR,
+    "YGO3_GAME_DIR",
+)
+
+
+# ---------------------------------------------------------------------------
+# Network configuration
+# ---------------------------------------------------------------------------
+
+SERVER_HOST = str(config_value("host", "0.0.0.0", "YGO3_HOST"))
+
+FRONT_ADDRESS = str(config_value("front_address", SERVER_HOST, "YGO3_FRONT_ADDRESS"))
+
+GATE_PORT = config_int(
+    "gate_port",
+    7911,
+    "YGO3_GATE_PORT",
+)
+
+FRONT_PORT = config_int(
+    "front_port",
+    7912,
+    "YGO3_FRONT_PORT",
+)
+
+DUEL_PORT = config_int(
+    "duel_port",
+    7913,
+    "YGO3_DUEL_PORT",
+)
+
+HTTP_PORT = config_int(
+    "http_port",
+    8080,
+    "YGO3_HTTP_PORT",
+)
+
+
+# ---------------------------------------------------------------------------
+# NPC AI configuration — LM Studio
+# ---------------------------------------------------------------------------
+
+NPC_AI_ENABLED = config_bool(
+    "npc_ai_enabled",
+    False,
+    "YGO3_NPC_AI_ENABLED",
+)
+
+LM_STUDIO_URL = str(
+    config_value(
+        "lm_studio_url",
+        "http://localhost:1234/v1",
+        "YGO3_LM_STUDIO_URL",
+    )
+).rstrip("/")
+
+LM_STUDIO_MODEL = str(
+    config_value(
+        "lm_studio_model",
+        "",
+        "YGO3_LM_STUDIO_MODEL",
+    )
+)
+
+LM_STUDIO_API_KEY = str(
+    config_value(
+        "lm_studio_api_key",
+        "",
+        "YGO3_LM_STUDIO_API_KEY",
+    )
+)
+
+NPC_AI_TIMEOUT = config_int(
+    "npc_ai_timeout",
+    30,
+    "YGO3_NPC_AI_TIMEOUT",
+)
+
+if NPC_AI_TIMEOUT < 1:
+    log.warning("NPC AI timeout must be positive. Resetting to 30 seconds.")
+    NPC_AI_TIMEOUT = 120
+
+
+# NPC AI is only usable when enabled and a model has been selected.
+NPC_AI_AVAILABLE = NPC_AI_ENABLED and bool(LM_STUDIO_URL) and bool(LM_STUDIO_MODEL)
+
+if NPC_AI_ENABLED:
+    if not LM_STUDIO_MODEL:
+        log.warning("NPC AI is enabled, but no LM Studio model ID is configured.")
+    else:
+        log.info(
+            "NPC AI enabled. LM Studio URL: %s | Model: %s",
+            LM_STUDIO_URL,
+            LM_STUDIO_MODEL,
+        )
+else:
+    log.info("NPC AI is disabled.")
+
+
+# ---------------------------------------------------------------------------
+# ocgcore configuration
+# ---------------------------------------------------------------------------
 
 # ocgcore's process() status codes.
 OCG_DUEL_STATUS_END = 0
@@ -83,6 +304,7 @@ DEFAULT_SCRIPT_FOLDERS = (
     "skill",
     "unofficial",
 )
+
 
 # ocgcore message type ids (MSG_*); MSG_NAME is the reverse lookup for logging.
 MSG = dict(
@@ -1066,12 +1288,12 @@ class DuelDriver:
 
 # --- Network, protocol and server settings ---------------------------------------
 # (HOST/ports, the shared Blowfish key, the login identity, event and duel announce options)
-HOST = os.getenv("YO3_HOST", config["host"])
+HOST = os.getenv("YGO3_HOST", config["host"])
 FRONT_ADDRESS = config["front_address"]
 GATE_PORT = int(config["gate_port"])
 FRONT_PORT = int(config["front_port"])
 DUEL_PORT = int(config["duel_port"])
-HTTP_PORT = int(os.getenv("YO3_HTTP_PORT", config["http_port"]))
+HTTP_PORT = int(os.getenv("YGO3_HTTP_PORT", config["http_port"]))
 
 KEY = b"12345678"
 LENGTH_MASK = 0x77777777
@@ -1082,17 +1304,17 @@ MAX_NESTING = 16
 VERSION = b"\x00\x12" + b"2010.03.23 skelton"
 
 USER_ID = 1001
-USERNAME = "test"
+USERNAME = "Duelist"
 
 REGULATION_ID = 3
 
 EVENT_ID = 1
-EVENT_TYPE = int(os.getenv("YO3_EVENT_TYPE", "1"))
-EVENT_STATUS = int(os.getenv("YO3_EVENT_STATUS", "1"))
-EVENT_LAYOUT = os.getenv("YO3_EVENT_LAYOUT", "items").lower()
+EVENT_TYPE = int(os.getenv("YGO3_EVENT_TYPE", "1"))
+EVENT_STATUS = int(os.getenv("YGO3_EVENT_STATUS", "1"))
+EVENT_LAYOUT = os.getenv("YGO3_EVENT_LAYOUT", "items").lower()
 EVENT_COUNTRY = "GB"
 
-DUEL_ANNOUNCE = os.getenv("YO3_DUEL_ANNOUNCE", "both").lower()
+DUEL_ANNOUNCE = os.getenv("YGO3_DUEL_ANNOUNCE", "both").lower()
 
 AUX_SUCCESS_REPLY = {
     0x17F2: 0x17F3,
@@ -1114,24 +1336,24 @@ DUEL_TURN_TIME = 180
 DUEL_TOTAL_TIME = 600
 # Seconds the Rock, Paper, Scissors screen shows (engine clock slot 4). Nothing in the client acts when it
 # reaches 0, so it is only a display.
-Roshambo_TIME = int(os.getenv("YO3_Roshambo_TIME", "30") or 30)
-PREMIUM = 1
+Roshambo_TIME = int(os.getenv("YGO3_Roshambo_TIME", "30") or 30)
+PREMIUM = int(os.getenv("YGO3_PREMIUM", "1") or 1)
 # Duelist Premium (the eagle at the top left). The client parses this text ("%4d-%2d-%2d %2d:%2d:%2d",
 # JST) with mktime/localtime (0x485B50/0x485C00); a missing or unparsable value makes localtime return
 # NULL and the client crashes (0x485CA1). 2037-12-31 23:59:59 is the last day a 32-bit time_t holds and
 # is the value the working revival server uses (eagle shows "Valid until 2037/12/31").
-PREMIUM_EXPIRE = "2037-12-31 23:59:59"
+PREMIUM_EXPIRE = os.getenv("YGO3_PREMIUM_EXPIRE", "2037-12-31 23:59:59")
 
 # item_type of the entries on the Special Packs shelf (0x1C2E). The docs say item_type < 3 go on the
 # shelves and higher ones only fill the Purchase screen. 10 (the AddEventPack kind) is what enabled the
-# Special Packs button in testing; 0 made it worse. YO3_SPECIAL_ITEM_TYPE overrides it.
-SPECIAL_ITEM_TYPE = int(os.getenv("YO3_SPECIAL_ITEM_TYPE", "10") or 10)
+# Special Packs button in testing; 0 made it worse. YGO3_SPECIAL_ITEM_TYPE overrides it.
+SPECIAL_ITEM_TYPE = int(os.getenv("YGO3_SPECIAL_ITEM_TYPE", "10") or 10)
 
 # pack_type values listed on the Special Packs tab (0x1C2E). Unknown until the data is inspected:
-# the server logs a histogram of the pack_type values it loads. Set YO3_SPECIAL_PACK_TYPES="2,3".
+# the server logs a histogram of the pack_type values it loads. Set YGO3_SPECIAL_PACK_TYPES="2,3".
 SPECIAL_PACK_TYPES = {
     int(x)
-    for x in os.getenv("YO3_SPECIAL_PACK_TYPES", "4").split(",")
+    for x in os.getenv("YGO3_SPECIAL_PACK_TYPES", "4").split(",")
     if x.strip().lstrip("-").isdigit()
 }
 
@@ -1151,7 +1373,7 @@ def premium_fields(dpoints, got=0):
 
 LANG_COUNTRY = {0: "JP", 1: "GB", 2: "DE", 3: "FR", 4: "IT", 5: "ES", 6: "KR", 7: "CN"}
 
-LEGACY = {x.strip() for x in os.getenv("YO3_LEGACY", "").split(",") if x.strip()}
+LEGACY = {x.strip() for x in os.getenv("YGO3_LEGACY", "").split(",") if x.strip()}
 
 JST = timezone(timedelta(hours=9))
 
@@ -1180,11 +1402,22 @@ USER_EVENT_OPEN, USER_EVENT_RUNNING, USER_EVENT_DONE = 12, 13, 14  # list status
 USER_EVENT_MAX_ENTRY = 512  # 64 blocks of 8 seats
 USER_EVENT_MAX_OPEN = 100  # events listed at once ("full" in create_status)
 USER_EVENTS_FINISHED_KEPT = 50  # finished events a lobby can still ask about
-ROUND_DELAY = float(os.getenv("YO3_ROUND_DELAY", "20"))  # seconds between rounds
+ROUND_DELAY = float(os.getenv("YGO3_ROUND_DELAY", "20"))  # seconds between rounds
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 STATE_FILE = DATA_DIR / "yo3_state.pkl"
+CONFIG_FILE = DATA_DIR / "ygo3_launcher_config.json"
+
+
+def _load_config():
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {}
 
 
 # Reads the game folder from --game-dir on the command line, if given.
@@ -1196,19 +1429,16 @@ def game_dir_from_args():
     return None
 
 
-# Finds the game folder: config, environment, the command line, else next to the server.
+# Finds the game folder from config file if no args/env are provided.
 def _default_game_dir():
-    if os.name == "nt":
-        return r"C:\Program Files (x86)\Konami\Yu-Gi-Oh! ONLINE 3"
-    return os.path.join(
-        os.path.expanduser("~"),
-        ".wine/drive_c/Program Files (x86)/Konami/Yu-Gi-Oh! ONLINE 3",
-    )
+    config = _load_config()
+    return config.get("game_dir")
 
 
-GAME_DIR = Path(
-    game_dir_from_args() or os.getenv("YO3_GAME_DIR") or _default_game_dir()
-).expanduser()
+_raw_game_dir = (
+    game_dir_from_args() or os.getenv("YGO3_GAME_DIR") or _default_game_dir()
+)
+GAME_DIR = Path(_raw_game_dir).expanduser() if _raw_game_dir else None
 
 WEB_ROOT = Path(__file__).resolve().parent / "www"
 WEB_ROOT.mkdir(exist_ok=True)
@@ -1265,7 +1495,7 @@ NEVER_ALLOWED_CARDS = (5280, 5434, 6276)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
-log = logging.getLogger("YO3Server")
+log = logging.getLogger("YGO3Server")
 
 
 # ctypes mirror: a player's starting LP, hand and draw count.
@@ -1342,7 +1572,7 @@ class OCG_DuelOptions(ctypes.Structure):
     ]
 
 
-# Read-only access to the OCG cards.cdb (stats, texts, setcodes) and the YO3-row -> passcode
+# Read-only access to the OCG cards.cdb (stats, texts, setcodes) and the YGO3-row -> passcode
 # mapping.
 class CardDatabase:
     # Opens the database and loads its name index.
@@ -1360,8 +1590,25 @@ class CardDatabase:
         self.lock = threading.RLock()
         self._yo3_cid_passcodes = {}
 
-        mapping_file = self.path.parent / "cardinfo.json"
-        if mapping_file.is_file():
+        # The Konami id -> passcode file (the revival project's engine/card-ids.json, YGOPRODeck's cardinfo
+        # format). Without it cards are matched by name and stats, which fails on the client's abbreviated
+        # names ("Red-Eyes B. Chick"). The first existing file of these is used.
+        here = Path(__file__).resolve().parent
+        candidates = [Path(p) for p in (os.getenv("YGO3_CARD_INFO"),) if p] + [
+            self.path.parent / "cardinfo.json",
+            self.path.parent / "card-ids.json",
+            here / "card-ids.json",
+            here / "cardinfo.json",
+            here.parent / "card-ids.json",
+        ]
+        mapping_file = next((c for c in candidates if c.is_file()), None)
+        if mapping_file is None:
+            log.warning(
+                "No card-ids.json / cardinfo.json found (looked next to cards.cdb and the server); "
+                "cards are matched by name, and some NPC decks may lose cards. Put card-ids.json next to "
+                "ygo3_server.py or set YGO3_CARD_INFO."
+            )
+        else:
             try:
                 import json
 
@@ -1373,12 +1620,13 @@ class CardDatabase:
                         if cid and passcode:
                             self._yo3_cid_passcodes.setdefault(cid, passcode)
                 log.info(
-                    "Loaded %d authoritative YO3 CID/passcode mappings",
+                    "Loaded %d authoritative YGO3 CID/passcode mappings from %s",
                     len(self._yo3_cid_passcodes),
+                    mapping_file,
                 )
             except Exception:
                 log.exception(
-                    "Could not load optional cardinfo.json; using CDB name/stat matching"
+                    "Could not load %s; using CDB name/stat matching", mapping_file
                 )
 
         columns = {
@@ -1429,7 +1677,7 @@ class CardDatabase:
     def _normalise_card_name(name: str) -> str:
         return re.sub(r"[^a-z0-9]", "", str(name or "").casefold())
 
-    # Finds rows whose name matches a YO3 name shortened with '...'.
+    # Finds rows whose name matches a YGO3 name shortened with '...'.
     def _abbreviated_name_rows(self, yo3_name: str):
         tokens = yo3_name.split()
         if not any(token.endswith(".") for token in tokens):
@@ -1457,22 +1705,25 @@ class CardDatabase:
 
         return matches
 
-    # Maps a YO3 card (by name/cid) to the OCG passcode, trying exact, normalised and abbreviated
+    # Maps a YGO3 card (by name/cid) to the OCG passcode, trying exact, normalised and abbreviated
     # names.
     def resolve_yo3_card(self, card) -> int:
         cid = int(getattr(card, "cid", 0) or 0)
         mapped = self._yo3_cid_passcodes.get(cid)
         if mapped:
-            if self.get_card(mapped) is None:
-                raise DuelDeckError(
-                    f"cardinfo.json maps YO3 CID {cid} to missing CDB passcode {mapped}"
-                )
-            return mapped
+            if self.get_card(mapped) is not None:
+                return mapped
+            # A card this cards.cdb does not have (client-only cards): fall back to name matching below.
+            log.warning(
+                "YGO3 CID %s maps to passcode %s, which cards.cdb does not have",
+                cid,
+                mapped,
+            )
 
         name = self._normalise_card_name(getattr(card, "name", ""))
         if not name:
             raise DuelDeckError(
-                f"YO3 CID {getattr(card, 'cid', '?')} has no name for passcode lookup"
+                f"YGO3 CID {getattr(card, 'cid', '?')} has no name for passcode lookup"
             )
 
         with self.lock:
@@ -1494,7 +1745,7 @@ class CardDatabase:
 
         if not rows:
             raise DuelDeckError(
-                f"No cards.cdb passcode found for YO3 CID {card.cid} ({card.name!r})"
+                f"No cards.cdb passcode found for YGO3 CID {card.cid} ({card.name!r})"
             )
 
         def score(row):
@@ -1519,7 +1770,7 @@ class CardDatabase:
                 winners = canonical
             elif canonical and best >= 2:
                 log.warning(
-                    "YO3 CID %s (%r) matches several identical CDB entries %s; using %d",
+                    "YGO3 CID %s (%r) matches several identical CDB entries %s; using %d",
                     card.cid,
                     card.name,
                     canonical,
@@ -1529,7 +1780,7 @@ class CardDatabase:
 
         if len(winners) != 1 or best < 2:
             raise DuelDeckError(
-                f"Ambiguous passcode for YO3 CID {card.cid} ({card.name!r}); candidates={winners}, matched_stats={best}/5."
+                f"Ambiguous passcode for YGO3 CID {card.cid} ({card.name!r}); candidates={winners}, matched_stats={best}/5."
             )
         return winners[0]
 
@@ -1956,9 +2207,9 @@ class DuelDeckError(ValueError):
     pass
 
 
-# Owns the live duels: converts YO3 decks to passcodes, creates duels and tracks them by id.
+# Owns the live duels: converts YGO3 decks to passcodes, creates duels and tracks them by id.
 class DuelManager:
-    # Binds the engine and the YO3 card table.
+    # Binds the engine and the YGO3 card table.
     def __init__(self, engine: DuelEngine, yo3_cards: dict):
         if not isinstance(engine, DuelEngine):
             raise TypeError("engine must be a DuelEngine")
@@ -1971,8 +2222,8 @@ class DuelManager:
         self.duels = {}
         self.lock = threading.RLock()
 
-    # Turns big-endian u16 YO3 rows into OCG passcodes.
-    def convert_rows(self, raw: bytes) -> list[int]:
+    # Turns big-endian u16 YGO3 rows into OCG passcodes.
+    def convert_rows(self, raw: bytes, lenient: bool = False) -> list[int]:
         if not isinstance(raw, bytes):
             raise DuelDeckError("Deck section must be bytes")
 
@@ -1987,21 +2238,28 @@ class DuelManager:
         for row in rows:
             card = self.yo3_cards.get(row)
             if card is None:
-                raise DuelDeckError(f"YO3 card row {row} does not exist")
+                raise DuelDeckError(f"YGO3 card row {row} does not exist")
 
             card_id = self._passcode_by_row.get(row)
             if card_id is None:
-                card_id = self.engine.database.resolve_yo3_card(card)
+                try:
+                    card_id = self.engine.database.resolve_yo3_card(card)
+                except DuelDeckError as exc:
+                    if not lenient:
+                        raise
+                    # An NPC deck plays on without a card this cards.cdb cannot give us.
+                    log.warning("[NPC] Leaving a card out of the deck: %s", exc)
+                    continue
                 self._passcode_by_row[row] = card_id
 
             if not 0 < card_id <= 0xFFFFFFFF:
-                raise DuelDeckError(f"Invalid card ID {card_id} for YO3 row {row}")
+                raise DuelDeckError(f"Invalid card ID {card_id} for YGO3 row {row}")
 
             result.append(card_id)
 
         return result
 
-    # Splits a deck (bytes, dict or object) into main/extra/side YO3 row lists.
+    # Splits a deck (bytes, dict or object) into main/extra/side YGO3 row lists.
     def extract_deck_rows(self, deck):
         if isinstance(deck, (bytes, bytearray)):
             sections = {
@@ -2034,7 +2292,7 @@ class DuelManager:
         return result
 
     # Converts and validates a deck (main 1-60, extra and side up to 15).
-    def convert_deck(self, deck):
+    def convert_deck(self, deck, lenient: bool = False):
         if isinstance(deck, (bytes, bytearray)):
             main_raw = bytes(deck)
             extra_raw = b""
@@ -2048,9 +2306,9 @@ class DuelManager:
             extra_raw = getattr(deck, "extra", b"")
             side_raw = getattr(deck, "side", b"")
 
-        main = self.convert_rows(main_raw)
-        extra = self.convert_rows(extra_raw)
-        side = self.convert_rows(side_raw)
+        main = self.convert_rows(main_raw, lenient)
+        extra = self.convert_rows(extra_raw, lenient)
+        side = self.convert_rows(side_raw, lenient)
 
         if not main:
             raise DuelDeckError("Main Deck is empty")
@@ -2091,7 +2349,7 @@ class DuelManager:
         original_rows1 = self.extract_deck_rows(deck1)
         original_rows2 = self.extract_deck_rows(deck2)
         converted1 = self.convert_deck(deck1)
-        converted2 = self.convert_deck(deck2)
+        converted2 = self.convert_deck(deck2, lenient=npc_player_id is not None)
 
         with self.lock:
             duel_id = secrets.token_hex(8)
@@ -4035,7 +4293,7 @@ def player_left(player_id):
         FRONT_MATCHMAKER.remove_player(player_id)
 
 
-# One YO3 card row: row, cid, name and stats.
+# One YGO3 card row: row, cid, name and stats.
 @dataclass(frozen=True)
 class Card:
     row: int
@@ -4334,7 +4592,7 @@ class GameData:
         archive = Path(game_dir) / "package" / "data002.ypk"
         if not archive.is_file():
             raise GameDataError(
-                f"{archive} not found. Point YO3_GAME_DIR (or --game-dir) at the installation folder."
+                f"{archive} not found. Point YGO3_GAME_DIR (or --game-dir) at the installation folder."
             )
 
         ypk = Ypk(archive)
@@ -4466,9 +4724,11 @@ class GameData:
             title = data.texts.get(NPC_DECK_TITLE + 2 * npc_id, "")
             data.official_decks.append((f"{duelist} - {title}", deck))
 
-        no_deck = [i for i in range(120, 195) if data.find_npc_deck(i) is None]
+        no_deck = [
+            i for i in range(120, 195) if data.find_npc_deck(i, exact=True) is None
+        ]
         log.info(
-            "[GameData] NPC decks: %d of 75 found; no preset deck for NPC ids %s",
+            "[GameData] NPC decks: %d of 75 found; stand-in decks for NPC ids %s",
             75 - len(no_deck),
             no_deck or "none",
         )
@@ -4491,11 +4751,25 @@ class GameData:
         return None
 
     # The deck an NPC plays.
-    def find_npc_deck(self, npc_id):
+    def find_npc_deck(self, npc_id, exact=False):
         name_id = NPC_DECK_TITLE + 2 * npc_id
-        return next(
+        deck = next(
             (d for d in self.decks if d.kind == 3 and d.name_id == name_id), None
         )
+        if deck is not None or exact:
+            return deck
+        # This game data has no deck for the NPC (140 preset decks here, 163 in the version the revival
+        # project was built on). The same level of the nearest character that has one stands in, so the
+        # NPC can still be dueled.
+        first = 120
+        level, group = (npc_id - first) % 3, (npc_id - first) // 3
+        for step in range(1, 26):
+            for other in (group - step, group + step):
+                if 0 <= other < 25:
+                    stand_in = self.find_npc_deck(first + 3 * other + level, exact=True)
+                    if stand_in is not None:
+                        return stand_in
+        return None
 
     # Cards whose name contains the text (case-insensitive), up to `limit`.
     def search(self, text, limit=30):
@@ -4515,18 +4789,18 @@ DUEL_MANAGER = None
 FRONT_MATCHMAKER = None
 
 DUEL_CONNECTIONS = {}
-YO3_JOIN_COUNTER = int(time.time()) & 0x7FFFFFFF
-YO3_DUEL_COUNTER = int(time.time() * 1000) & 0x7FFFFFFF
+YGO3_JOIN_COUNTER = int(time.time()) & 0x7FFFFFFF
+YGO3_DUEL_COUNTER = int(time.time() * 1000) & 0x7FFFFFFF
 
 
 # Next join id or duel id (31-bit counters).
 def next_yo3_id(which="join"):
-    global YO3_JOIN_COUNTER, YO3_DUEL_COUNTER
+    global YGO3_JOIN_COUNTER, YGO3_DUEL_COUNTER
     if which == "duel":
-        YO3_DUEL_COUNTER = (YO3_DUEL_COUNTER + 1) & 0x7FFFFFFF
-        return YO3_DUEL_COUNTER
-    YO3_JOIN_COUNTER = (YO3_JOIN_COUNTER + 1) & 0x7FFFFFFF
-    return YO3_JOIN_COUNTER
+        YGO3_DUEL_COUNTER = (YGO3_DUEL_COUNTER + 1) & 0x7FFFFFFF
+        return YGO3_DUEL_COUNTER
+    YGO3_JOIN_COUNTER = (YGO3_JOIN_COUNTER + 1) & 0x7FFFFFFF
+    return YGO3_JOIN_COUNTER
 
 
 # Loads the game data and builds the shop catalogues (protectors, sleeves, disks, avatar items).
@@ -4641,7 +4915,7 @@ def init_game_data():
         dd_set = set(duel_disk_ids)
         env_kinds = {
             int(x)
-            for x in os.getenv("YO3_DUEL_DISK_KINDS", "").split(",")
+            for x in os.getenv("YGO3_DUEL_DISK_KINDS", "").split(",")
             if x.strip().isdigit()
         }
         disk_kinds = set(env_kinds)
@@ -4881,7 +5155,7 @@ def encode_value(value):
         return (TYPE_TEXT, struct.pack(">I", len(raw)) + raw)
     if isinstance(value, bytes):
         return (TYPE_BINARY, struct.pack(">I", len(value)) + value)
-    raise TypeError(f"Unsupported YO3 value type: {type(value)}")
+    raise TypeError(f"Unsupported YGO3 value type: {type(value)}")
 
 
 # Accepts a dict or MessageRecord and returns (fields, items, tag).
@@ -4890,7 +5164,7 @@ def normalize_record(item):
         return item.fields, item.items, item.tag
     if isinstance(item, dict):
         return item, [], TAG_RECORD
-    raise TypeError(f"Invalid YO3 record: {type(item)}")
+    raise TypeError(f"Invalid YGO3 record: {type(item)}")
 
 
 # Serialises fields and nested items into the wire format.
@@ -5272,7 +5546,7 @@ class ClientSession:
         await self.send_message(0x1C2E, items=items)
 
     # Dispatches one front request by id; the numbers are the client's request ids (see
-
+    # protocol.md).
     async def handle_front(self, request_id, message):
         fields = message.get("fields", {})
         items = message.get("items", [])
@@ -5472,9 +5746,16 @@ class ClientSession:
             return
 
         if request_id == 0x1F41:
+            # item[0] {lang} whose items are {starttime (JST), title, body}: what the world menu's
+            # information window lists (InfoWindow 0x458410).
+            now = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+            entries = [
+                MessageRecord(fields={"starttime": now, "title": title, "body": body})
+                for title, body in WELCOME_NEWS
+            ]
             await self.send_message(
                 0x21FC,
-                items=[{"lang": "1"}],
+                items=[MessageRecord(fields={"lang": "1"}, items=entries)],
             )
             return
 
@@ -5856,10 +6137,20 @@ class ClientSession:
             await self.opener()
 
             while not self.closed:
-                packet = await asyncio.wait_for(
-                    read_frame(self.reader),
-                    timeout=180,
-                )
+                if self.service == "Front":
+                    # The Front socket must stay registered while the client plays on
+                    # the separate Duel socket. A duel can easily be idle for more
+                    # than three minutes; timing this connection out removes the
+                    # player from STATE.online and makes the 0x2009 result push fail.
+                    # read_frame still returns/raises immediately when the peer
+                    # actually disconnects.
+                    packet = await read_frame(self.reader)
+                else:
+                    # Gate is only a short-lived hand-off connection.
+                    packet = await asyncio.wait_for(
+                        read_frame(self.reader),
+                        timeout=180,
+                    )
 
                 log.info(
                     "[%s] RAW incoming packet (%d bytes): %s",
@@ -6231,6 +6522,15 @@ class ClientSession:
 
             if not self.npc_native_duel_id:
                 npc_preset = GAME.find_npc_deck(self.npc_id)
+                if (
+                    npc_preset is not None
+                    and GAME.find_npc_deck(self.npc_id, exact=True) is None
+                ):
+                    log.warning(
+                        "[NPC] NPC %s has no deck in this game data; playing stand-in deck %s",
+                        self.npc_id,
+                        npc_preset.deck_id,
+                    )
 
                 if npc_preset is None:
                     log.error(
@@ -7541,22 +7841,485 @@ class ClientSession:
         await self.send_message(0x2777, dict(present), [dict(present)])
 
 
-YO3_SERVER_DUEL = 0x200D
-YO3_CLIENT_DUEL = 0x200C
-YO3_ENTER = 0x200A
-YO3_ENGINE_COMMAND = 0x11
-YO3_Roshambo_BEGIN = 1500
-YO3_Roshambo_RESOLVE = 1501
-YO3_FIRST_BEGIN = 1502
-YO3_FIRST_RESOLVE = 1503
-YO3_SELECT_HAND = 0x0C
-YO3_SELECT_FIRST = 13
-YO3_FIRST = 1
-YO3_SECOND = 2
+YGO3_SERVER_DUEL = 0x200D
+YGO3_CLIENT_DUEL = 0x200C
+YGO3_ENTER = 0x200A
+YGO3_ENGINE_COMMAND = 0x11
+YGO3_Roshambo_BEGIN = 1500
+YGO3_Roshambo_RESOLVE = 1501
+YGO3_FIRST_BEGIN = 1502
+YGO3_FIRST_RESOLVE = 1503
+YGO3_SELECT_HAND = 0x0C
+YGO3_SELECT_FIRST = 13
+YGO3_FIRST = 1
+YGO3_SECOND = 2
 
 
 # One connection on the duel port: runs the duel for its player (NPC duels only), translating
 # engine messages for the client.
+# NPC chat is generated from the LLM's duel decision below. No hard-coded NPC dialogue.
+NPC_FIRST_ID = 120
+NPC_NAME_TEXT = 0x5208
+BANTER_GAP = 1.5  # minimum spacing between LLM announcements, in seconds
+
+
+# The information window's announcements (title, body). YGO3_WELCOME_MESSAGE replaces the text.
+WELCOME_NEWS = [
+    (
+        "Announcement",
+        os.getenv(
+            "YGO3_WELCOME_MESSAGE", "Welcome to the ygo3-research private server!"
+        ),
+    )
+]
+# Life Point changes with their number, sound and the avatar's line; YGO3_LP_ANIMATION=0 sends the plain change.
+LP_ANIMATION = os.getenv("YGO3_LP_ANIMATION", "1") not in ("0", "false", "no")
+# The one LM Studio prompt: LM_DUEL_ROLE, then the duel (state and legal actions), then LM_DUEL_RULES.
+
+
+LM_DUEL_ROLE = (
+    "You are an elite professional Yu-Gi-Oh! competitive duelist AI, "
+    "with exceptional tactical calculation, strategic planning, "
+    "combo optimisation, threat assessment and resource management. "
+    "Your objective is to maximise the probability of winning every "
+    "duel. Think like a tournament-level player. Evaluate the entire "
+    "game state, calculate consequences, anticipate opponent responses "
+    "and identify the strongest available strategic line. "
+    "Never play mechanically, follow fixed action priorities or "
+    "select actions simply because they are available. "
+    "Make intelligent, situation-dependent decisions. "
+    "Legality is absolute. Strategic quality determines your choice."
+)
+
+LM_DUEL_RULES = (
+    "==================================================\n"
+    "1. ABSOLUTE LEGALITY AND GAME STATE AUTHORITY\n"
+    "==================================================\n"
+    "1. AVAILABLE ACTIONS is the absolute authority for legality.\n"
+    "2. Select EXACTLY ONE action from the current list.\n"
+    "3. Use the exact action name and exact index provided.\n"
+    "4. Actions without an index must use index 0.\n"
+    "5. Never invent actions, targets, effects, cards or indices.\n"
+    "6. Never assume an action remains available after another action.\n"
+    "7. Never rely on outdated game-state information.\n"
+    "8. Respect activation conditions, costs, restrictions, once-per-turn "
+    "limitations, summoning requirements, targets and zone availability.\n"
+    "9. Never invent missing card text or assume unknown effects.\n"
+    "10. Distinguish between activating, setting, summoning and attacking.\n"
+    "11. Setting a card is not activating it.\n"
+    "12. Entering Battle Phase does not declare an attack.\n"
+    "13. Only explicitly listed attack actions authorize attacks.\n"
+    "14. If information is missing, make conservative decisions based "
+    "only on established game facts.\n\n"
+    "==================================================\n"
+    "2. ADVANCED GAME STATE ANALYSIS\n"
+    "==================================================\n"
+    "Before selecting an action, construct a complete tactical picture.\n"
+    "Evaluate:\n"
+    "- Your Life Points and opponent's Life Points.\n"
+    "- Current turn, phase and turn player.\n"
+    "- Every monster, including ATK, DEF, position and known effects.\n"
+    "- Every known Spell and Trap on both fields.\n"
+    "- Your hand and available resources.\n"
+    "- Both Graveyards and known banished cards.\n"
+    "- Available monster and Spell/Trap zones.\n"
+    "- Known restrictions and once-per-turn effects.\n"
+    "- Current available actions and their targets.\n"
+    "- Previous actions and their confirmed consequences.\n"
+    "- Immediate threats and possible future plays.\n\n"
+    "Distinguish carefully between:\n"
+    "KNOWN INFORMATION: explicitly provided by the game.\n"
+    "DERIVED INFORMATION: mathematically or logically established.\n"
+    "UNKNOWN INFORMATION: hidden cards and unconfirmed effects.\n\n"
+    "Never treat speculation as fact.\n"
+    "Use uncertainty when assessing possible opponent responses.\n"
+    "Never confuse the player's field with the opponent's field.\n"
+    "Never confuse cards in hand with cards on the field.\n"
+    "Never confuse Graveyard cards with available cards.\n"
+    "Never assume a previously used card remains available.\n\n"
+    "==================================================\n"
+    "3. STRATEGIC ACTION EVALUATION\n"
+    "==================================================\n"
+    "Evaluate EVERY available action before choosing one.\n"
+    "Do not use a fixed action priority.\n\n"
+    "Assess each action according to the following dimensions:\n\n"
+    "A. WINNING POTENTIAL:\n"
+    "- Does the action create immediate lethal damage?\n"
+    "- Does it establish a guaranteed winning sequence?\n"
+    "- Does it prevent an imminent loss?\n\n"
+    "B. CARD ADVANTAGE:\n"
+    "- Does it generate additional cards?\n"
+    "- Does it remove multiple opposing resources?\n"
+    "- Does it recover valuable resources?\n"
+    "- Does it trade favourably in cards?\n\n"
+    "C. BOARD ADVANTAGE:\n"
+    "- Does it establish stronger monsters?\n"
+    "- Does it remove dangerous opposing monsters?\n"
+    "- Does it create useful protection or disruption?\n"
+    "- Does it improve the number and quality of future options?\n\n"
+    "D. TEMPO:\n"
+    "- Does it force the opponent to respond?\n"
+    "- Does it interrupt their development?\n"
+    "- Does it establish pressure before they can recover?\n\n"
+    "E. RESOURCE COST:\n"
+    "- What cards, Life Points or effects are consumed?\n"
+    "- Are important once-per-turn effects being wasted?\n"
+    "- Are valuable resources being unnecessarily committed?\n\n"
+    "F. FUTURE POTENTIAL:\n"
+    "- What actions become available afterward?\n"
+    "- Does this action improve future combo opportunities?\n"
+    "- Does it preserve useful options for later turns?\n\n"
+    "G. RISK:\n"
+    "- Could the action expose your board to removal?\n"
+    "- Could it leave you vulnerable to lethal damage?\n"
+    "- Could an opposing response negate its value?\n"
+    "- Is the potential reward worth the risk?\n\n"
+    "Choose the action with the greatest overall expected strategic "
+    "value, not necessarily the greatest immediate benefit.\n\n"
+    "==================================================\n"
+    "4. MULTI-STEP COMBO PLANNING\n"
+    "==================================================\n"
+    "Think several actions ahead whenever the current information "
+    "allows it.\n\n"
+    "For each promising action:\n"
+    "1. Determine its immediate result.\n"
+    "2. Identify the additional actions it enables.\n"
+    "3. Evaluate the resulting board and remaining resources.\n"
+    "4. Identify possible follow-up summons and activations.\n"
+    "5. Consider how the opponent could respond.\n"
+    "6. Estimate the final strategic position.\n\n"
+    "Prioritise sequences that:\n"
+    "- Generate multiple resources from limited investment.\n"
+    "- Establish meaningful interruption.\n"
+    "- Produce strong monsters with useful effects.\n"
+    "- Preserve follow-up plays.\n"
+    "- Create lethal opportunities.\n"
+    "- Minimise unnecessary resource expenditure.\n\n"
+    "Do not assume future actions are guaranteed to remain legal.\n"
+    "Do not execute multiple actions in one response.\n"
+    "Plan ahead, execute one action, then reassess the new state.\n"
+    "Avoid prematurely consuming once-per-turn effects when a better "
+    "sequence can use them later.\n\n"
+    "==================================================\n"
+    "5. ADVANCED EFFECT SEQUENCING\n"
+    "==================================================\n"
+    "Evaluate the timing and order of available effects carefully.\n\n"
+    "Consider:\n"
+    "- Whether a search should occur before another effect.\n"
+    "- Whether a draw effect should be used before committing resources.\n"
+    "- Whether an effect can extend a combo.\n"
+    "- Whether an effect should be preserved for a more valuable target.\n"
+    "- Whether activating an effect now exposes it to disruption.\n"
+    "- Whether an activation can bait a known interruption.\n"
+    "- Whether removing a threat first makes later plays safer.\n"
+    "- Whether an effect becomes more valuable after another action.\n\n"
+    "Never assume chain mechanics, response windows or card effects "
+    "that are not supported by the current game information.\n"
+    "Never invent an opponent's response.\n\n"
+    "==================================================\n"
+    "6. OPPONENT MODELLING AND THREAT PRIORITISATION\n"
+    "==================================================\n"
+    "Treat the opponent as an intelligent player.\n\n"
+    "Identify:\n"
+    "- Monsters capable of generating recurring advantage.\n"
+    "- Cards that enable powerful combos.\n"
+    "- Effects that protect other important cards.\n"
+    "- Threats capable of producing lethal damage.\n"
+    "- Known negation and removal effects.\n"
+    "- Cards that must be answered before developing your board.\n\n"
+    "Prioritise disruption according to strategic importance.\n"
+    "Do not automatically remove the monster with the highest ATK.\n"
+    "An engine monster may be more dangerous than a stronger attacker.\n\n"
+    "Consider the opportunity cost of using disruption immediately.\n"
+    "Preserve powerful responses for more important threats when "
+    "doing so does not create unacceptable immediate danger.\n\n"
+    "Unknown opposing cards are possibilities, not established facts.\n"
+    "Do not become excessively passive because of hypothetical threats.\n\n"
+    "==================================================\n"
+    "7. SUMMONING AND BOARD DEVELOPMENT\n"
+    "==================================================\n"
+    "Evaluate summons according to their complete strategic value.\n\n"
+    "Consider:\n"
+    "- Immediate field presence.\n"
+    "- ATK and DEF usefulness.\n"
+    "- Effect value and disruption.\n"
+    "- Search, draw and recovery potential.\n"
+    "- Combo extension.\n"
+    "- Protection and survivability.\n"
+    "- Future summoning opportunities.\n"
+    "- Resource expenditure.\n"
+    "- Available zones.\n\n"
+    "Do not summon a monster simply because it has high ATK.\n"
+    "Do not fill field zones without a strategic purpose.\n"
+    "Do not overcommit resources to one monster unnecessarily.\n"
+    "Prefer strong boards that combine offensive pressure, defensive "
+    "stability and useful interaction.\n\n"
+    "==================================================\n"
+    "8. SPELL AND TRAP OPTIMISATION\n"
+    "==================================================\n"
+    "Evaluate the immediate and future value of every available "
+    "Spell and Trap action.\n\n"
+    "Consider:\n"
+    "- Activation requirements and costs.\n"
+    "- Whether the effect generates advantage.\n"
+    "- Whether the effect interrupts an important opponent action.\n"
+    "- Whether setting provides useful future interaction.\n"
+    "- Whether activation now is better than preservation.\n"
+    "- Whether the action consumes an important zone.\n"
+    "- Whether other effects restrict further activations.\n\n"
+    "Never set a card when activating it is the clearly superior "
+    "legal action.\n"
+    "Never activate a card simply because it is available.\n"
+    "Never describe a Set action as an activation.\n"
+    "When setting a card, never reveal its identity in the reason.\n\n"
+    "==================================================\n"
+    "9. LETHAL DAMAGE AND WINNING SEQUENCES\n"
+    "==================================================\n"
+    "Winning immediately is the highest strategic priority.\n\n"
+    "Calculate:\n"
+    "- Opponent's remaining Life Points.\n"
+    "- Damage from every available attacker.\n"
+    "- Which opposing monsters can be defeated in battle.\n"
+    "- Whether direct attacks are explicitly available.\n"
+    "- Whether attacks can remove blockers.\n"
+    "- Whether additional actions create lethal opportunities.\n"
+    "- Whether known effects can prevent the winning sequence.\n\n"
+    "Prioritise legal lethal sequences over unnecessary setup.\n"
+    "Do not sacrifice a guaranteed win for speculative advantage.\n"
+    "If lethal is not available, maximise pressure while preserving "
+    "a favourable strategic position.\n"
+    "Never claim victory until confirmed by the game.\n\n"
+    "==================================================\n"
+    "10. MANDATORY BATTLE PHASE OPTIMISATION\n"
+    "==================================================\n"
+    "The Battle Phase must be evaluated exhaustively.\n"
+    "NEVER prematurely end the Battle Phase.\n\n"
+    "For EVERY available attack action:\n"
+    "1. Identify the attacking monster.\n"
+    "2. Identify the exact target or direct attack.\n"
+    "3. Calculate battle damage or Life Point damage.\n"
+    "4. Determine whether your monster survives.\n"
+    "5. Determine whether the opposing monster is destroyed.\n"
+    "6. Evaluate any known battle effects.\n"
+    "7. Consider the strategic value of the resulting trade.\n\n"
+    "BATTLE DAMAGE CALCULATION:\n"
+    "- Against an Attack Position monster, compare ATK with ATK.\n"
+    "- Against a Defense Position monster, compare attacking ATK "
+    "with defending DEF.\n"
+    "- When attacking a Defense Position monster, normally no "
+    "battle damage is inflicted unless an effect specifies otherwise.\n"
+    "- When attacking an Attack Position monster with lower ATK, "
+    "calculate the difference as damage to the opponent.\n"
+    "- When attacking an Attack Position monster with higher ATK, "
+    "calculate the difference as damage to your own Life Points.\n"
+    "- Equal ATK normally destroys both Attack Position monsters "
+    "without battle damage.\n"
+    "- Always account for known battle effects and damage modifiers.\n"
+    "- Never confuse ATK and DEF.\n"
+    "- Never invent damage calculations for unknown effects.\n\n"
+    "Compare all available attacks rather than evaluating only "
+    "the first attack in the list.\n\n"
+    "ATTACK ORDER:\n"
+    "- Consider whether removing a blocker enables direct damage.\n"
+    "- Consider whether a weaker monster should attack first.\n"
+    "- Consider whether a stronger monster should destroy a threat.\n"
+    "- Consider whether an attack can expose or bait a known response.\n"
+    "- Prioritise lethal damage when a legal winning sequence exists.\n"
+    "- Preserve valuable monsters when the attack offers insufficient "
+    "strategic benefit.\n\n"
+    "AFTER EVERY ATTACK:\n"
+    "- Read the updated game state.\n"
+    "- Read the complete new AVAILABLE ACTIONS list.\n"
+    "- Recalculate remaining damage and lethal potential.\n"
+    "- Check every remaining attack action.\n"
+    "- Continue with other attackers when profitable legal attacks "
+    "remain available.\n\n"
+    "A restriction affecting one monster does not automatically "
+    "affect other monsters.\n"
+    "Never assume one monster attacking prevents another from attacking.\n"
+    "Never assume an attack remains available after resolution.\n"
+    "Never assume a monster can attack unless the action is listed.\n"
+    "Never end the Battle Phase while worthwhile legal attacks remain.\n\n"
+    "==================================================\n"
+    "11. CRITICAL: DIRECT ATTACK DETECTION\n"
+    "==================================================\n"
+    "Before ending the Battle Phase, explicitly check whether "
+    "the opponent controls any monsters.\n\n"
+    "IF THE OPPONENT CONTROLS ZERO MONSTERS:\n"
+    "1. Check whether your monsters can legally attack.\n"
+    "2. Inspect AVAILABLE ACTIONS for explicit direct attacks.\n"
+    "3. Calculate the damage from every available direct attack.\n"
+    "4. Prioritise lethal damage when available.\n"
+    "5. Never end the Battle Phase while a profitable legal direct "
+    "attack remains available.\n\n"
+    "IF THE OPPONENT CONTROLS MONSTERS:\n"
+    "1. Evaluate every available attack target.\n"
+    "2. Check whether removing blockers enables direct attacks.\n"
+    "3. Recalculate direct attack opportunities after every battle.\n\n"
+    "An empty opposing field does not automatically guarantee "
+    "that an attack is legal.\n"
+    "Attack restrictions and AVAILABLE ACTIONS remain authoritative.\n"
+    "However, never overlook an explicitly available direct attack.\n\n"
+    "==================================================\n"
+    "12. CRITICAL: SELF-LOCK AND ACTION CONSEQUENCE AWARENESS\n"
+    "==================================================\n"
+    "Before activating ANY card or effect, evaluate its complete "
+    "effect on BOTH players and the entire game state.\n\n"
+    "1. Never evaluate an effect only from your own immediate benefit.\n"
+    "2. Determine whether an effect also restricts your own actions.\n"
+    "3. Identify every action that the effect enables or prevents.\n"
+    "4. Consider how the effect interacts with your current monsters.\n"
+    "5. Consider how the effect interacts with opposing monsters.\n"
+    "6. Consider how long the restriction remains active.\n"
+    "7. Evaluate whether the effect prevents your own attacks, summons, "
+    "activations or other important plays.\n"
+    "8. Never activate a symmetrical restriction without evaluating "
+    "its consequences for both players.\n"
+    "9. Do not activate a card that prevents an immediately available "
+    "winning opportunity unless necessary to prevent a greater threat.\n"
+    "10. Recalculate your strategy after every successful activation.\n\n"
+    "EXAMPLES:\n"
+    "- Nightmare's Steelcage prevents BOTH players from attacking. "
+    "Consider whether your own attacks are more valuable before "
+    "activating it.\n"
+    "- A restriction on Spell activations may prevent your own "
+    "future Spell plays.\n"
+    "- A restriction on Special Summons may disable your own combos.\n"
+    "- A restriction on attacks may prevent your own lethal damage.\n\n"
+    "Never assume an effect is one-sided when its card text indicates "
+    "that both players are affected.\n"
+    "Never activate an effect without understanding its consequences "
+    "to the extent supported by available information.\n\n"
+    "==================================================\n"
+    "13. RESOURCE MANAGEMENT AND SURVIVABILITY\n"
+    "==================================================\n"
+    "Balance aggression with future survivability.\n\n"
+    "Preserve:\n"
+    "- Important cards and once-per-turn effects.\n"
+    "- Useful defensive interactions.\n"
+    "- Valuable cards in hand.\n"
+    "- Resources needed for future combos.\n"
+    "- Field space for important follow-up plays.\n\n"
+    "Avoid:\n"
+    "- Unnecessary Life Point expenditure.\n"
+    "- Wasteful card trades.\n"
+    "- Excessive field commitment.\n"
+    "- Activations with little strategic impact.\n"
+    "- Unnecessary summons and Sets.\n"
+    "- Ending a phase while productive actions remain.\n\n"
+    "Evaluate whether your current board can survive the opponent's "
+    "likely next turn.\n"
+    "Do not prioritise maximum damage if doing so creates an "
+    "unacceptable risk of losing immediately.\n\n"
+    "==================================================\n"
+    "14. DYNAMIC DECISION-MAKING\n"
+    "==================================================\n"
+    "Your strategy must adapt continuously.\n\n"
+    "AGGRESSIVE POSITION:\n"
+    "Prioritise lethal, damage pressure and forcing responses.\n\n"
+    "DEFENSIVE POSITION:\n"
+    "Prioritise survival, threat removal and efficient resource use.\n\n"
+    "AHEAD IN RESOURCES:\n"
+    "Preserve advantage and avoid unnecessary risks.\n\n"
+    "BEHIND IN RESOURCES:\n"
+    "Seek efficient trades, powerful effects and comeback opportunities.\n\n"
+    "LOW LIFE POINTS:\n"
+    "Prioritise preventing lethal threats.\n\n"
+    "OPPONENT LOW LIFE POINTS:\n"
+    "Evaluate every possible route to lethal damage.\n\n"
+    "WEAK BOARD:\n"
+    "Prioritise meaningful development and protection.\n\n"
+    "STRONG BOARD:\n"
+    "Maintain control while converting advantage into victory.\n\n"
+    "Never follow these modes blindly. Evaluate the actual game state.\n\n"
+    "==================================================\n"
+    "15. AVAILABLE ACTIONS AUDIT\n"
+    "==================================================\n"
+    "Before ending ANY phase or turn, perform a mandatory audit.\n\n"
+    "1. Read every currently available action.\n"
+    "2. Identify every available attack action.\n"
+    "3. Identify every available direct attack.\n"
+    "4. Identify every available summon and activation.\n"
+    "5. Identify every useful Set action.\n"
+    "6. Check whether a known restriction explains missing actions.\n"
+    "7. Determine whether a previous activation disabled an action.\n"
+    "8. Determine whether another productive action remains available.\n"
+    "9. End the phase only when no worthwhile legal action remains.\n\n"
+    "Never assume an attack is unavailable merely because "
+    "the first attack was unsuccessful.\n"
+    "Never assume an attack is available merely because "
+    "the opponent has no monsters.\n"
+    "The current AVAILABLE ACTIONS list is authoritative.\n\n"
+    "==================================================\n"
+    "16. REASONING CONSISTENCY AND VALIDATION\n"
+    "==================================================\n"
+    "Your internal evaluation and selected action must agree.\n\n"
+    "Before returning JSON, verify:\n"
+    "1. Does the selected action match the current action list?\n"
+    "2. Is the index exactly correct?\n"
+    "3. Does the reason accurately describe the selected action?\n"
+    "4. Does the reason confuse setting with activating?\n"
+    "5. Does the reason claim an attack that was not selected?\n"
+    "6. Does the reason claim an effect has resolved prematurely?\n"
+    "7. Does the selected action contradict a known restriction?\n"
+    "8. Have you overlooked an immediate lethal opportunity?\n"
+    "9. Have you overlooked an available direct attack?\n"
+    "10. Have you accidentally disabled your own strategy?\n\n"
+    "If any contradiction exists, correct the decision before "
+    "returning the JSON.\n\n"
+    "==================================================\n"
+    "17. MANDATORY DECISION ALGORITHM\n"
+    "==================================================\n"
+    "Before EVERY response, follow this procedure:\n\n"
+    "STEP 1: Read the complete current game state.\n"
+    "STEP 2: Read the complete current AVAILABLE ACTIONS list.\n"
+    "STEP 3: Eliminate all illegal or unsupported actions.\n"
+    "STEP 4: Identify immediate lethal and survival opportunities.\n"
+    "STEP 5: Identify the opponent's most important threats.\n"
+    "STEP 6: Evaluate all remaining actions individually.\n"
+    "STEP 7: Consider their immediate consequences.\n"
+    "STEP 8: Consider the strongest plausible follow-up sequence.\n"
+    "STEP 9: Estimate resource costs, risks and future board value.\n"
+    "STEP 10: Check for self-locking and missed direct attacks.\n"
+    "STEP 11: Compare the strategic value of the alternatives.\n"
+    "STEP 12: Select the strongest single legal action.\n"
+    "STEP 13: Validate the action name and index.\n"
+    "STEP 14: Return exactly one valid JSON object.\n"
+    "STEP 15: Wait for execution and reassess the updated state.\n\n"
+    "IMPORTANT:\n"
+    "Never execute multiple actions in one response.\n"
+    "Never use an outdated action list.\n"
+    "Never assume an action will resolve successfully before confirmation.\n"
+    "Never stop evaluating alternatives because one action is poor.\n"
+    "Never pass while worthwhile legal actions remain.\n"
+    "Do not perform pointless actions merely to delay passing.\n\n"
+    "==================================================\n"
+    "18. REASON AND OUTPUT FORMAT\n"
+    "==================================================\n"
+    "REASON:\n"
+    "Write ONE short, confident, first-person sentence spoken "
+    "in character as a competitive Yu-Gi-Oh! duelist.\n"
+    "Describe ONLY the action actually selected.\n"
+    "Do not describe rejected actions or internal strategic analysis.\n"
+    "Never claim an effect has resolved, damage has been inflicted "
+    "or victory has occurred before confirmation.\n"
+    "When setting a card, NEVER reveal its identity.\n"
+    "Keep the sentence concise and natural.\n\n"
+    "OUTPUT:\n"
+    "Return EXACTLY ONE valid JSON object and absolutely nothing else.\n"
+    "No markdown, code fences, analysis or additional text.\n"
+    "Use correctly escaped JSON strings.\n"
+    "The index must always be a number.\n"
+    "Required format:\n"
+    '{"action":"<exact_action_name>","index":0,'
+    '"reason":"<one short spoken sentence>"}'
+)
+
+
+# The NPC says in the duel chat which card it plays and why, from the LM Studio decision.
+ANNOUNCE_ENABLED = os.getenv("YGO3_NPC_ANNOUNCE", "1") not in ("0", "false", "no")
+
+
 class DuelSession:
     # Binds the stream and the per-duel mirror of the board.
     def __init__(self, reader, writer, turn_timeout: int = 180):
@@ -7579,6 +8342,13 @@ class DuelSession:
         self.player_hand = None
         self.cpu_hand = None
         self.Roshambo_result = None
+        self._banter = None
+        self._in_battle = False
+        self._cpu_tried = set()
+        self._cpu_tried_turn = -1
+        self._lp = {0: 8000, 1: 8000}
+        self._lm_cards = {}
+        self._chain_links = []
         self._Roshambo_task = None
         self.turn_order = None
         self.pending_list_indices = []
@@ -7599,7 +8369,7 @@ class DuelSession:
             self.writer.write(encode_frame(make_reply(request_id, fields, items)))
             await self.writer.drain()
         log.info(
-            "[Duel] Sent YO3 packet 0x%04X fields=%r items=%d",
+            "[Duel] Sent YGO3 packet 0x%04X fields=%r items=%d",
             request_id,
             fields,
             len(items),
@@ -7609,17 +8379,17 @@ class DuelSession:
     async def send_engine_command(self, command_id, params=None):
         params = list(params or [])
         if len(params) > 4:
-            raise ValueError("YO3 engine command takes at most four parameters")
+            raise ValueError("YGO3 engine command takes at most four parameters")
         params += [0] * (4 - len(params))
         fields = {
-            "duelRequestName": YO3_ENGINE_COMMAND,
+            "duelRequestName": YGO3_ENGINE_COMMAND,
             "id": int(command_id),
             "param1": int(params[0]),
             "param2": int(params[1]),
             "param3": int(params[2]),
             "param4": int(params[3]),
         }
-        await self.send_message(YO3_SERVER_DUEL, fields)
+        await self.send_message(YGO3_SERVER_DUEL, fields)
 
     # Restarts the turn clock.
     async def reset_timer(self):
@@ -7648,7 +8418,7 @@ class DuelSession:
             "total2_max": total_time,
             "other_max": int(other),
         }
-        await self.send_message(YO3_SERVER_DUEL, fields)
+        await self.send_message(YGO3_SERVER_DUEL, fields)
 
     # Starts the rock-paper-scissors that decides who chooses the turn order.
     async def begin_Roshambo(self):
@@ -7657,12 +8427,12 @@ class DuelSession:
         # shows 00:00. timerKind 4 runs that slot, which then counts down by wall-clock seconds. It is
         # sent before the begin command (the scene reads the slot when it opens) and again after it.
         await self.send_duel_timer(4, other=Roshambo_TIME)
-        await self.send_engine_command(YO3_Roshambo_BEGIN, [0, 0, 0, 0])
+        await self.send_engine_command(YGO3_Roshambo_BEGIN, [0, 0, 0, 0])
         await self.send_duel_timer(4, other=Roshambo_TIME)
         self._start_Roshambo_timeout()
 
     async def send_opening_setup(self, duel, order):
-        """Build the YO3 opening board from the already-started OCG duel."""
+        """Build the YGO3 opening board from the already-started OCG duel."""
         rows_by_team = duel["original_deck_rows"]
         decks_by_team = duel["decks"]
 
@@ -7674,7 +8444,7 @@ class DuelSession:
         cpu_team = 1 - client_team
         team_to_client = {client_team: 0, cpu_team: 1}
 
-        first = 0 if order == YO3_FIRST else 1
+        first = 0 if order == YGO3_FIRST else 1
 
         team_cards = {}
         for team in (0, 1):
@@ -7727,7 +8497,7 @@ class DuelSession:
                 )
                 if match_index is None:
                     raise RuntimeError(
-                        f"Cannot map drawn OCG card {code} to YO3 deck row"
+                        f"Cannot map drawn OCG card {code} to YGO3 deck row"
                     )
                 ordered.append(remaining.pop(match_index))
 
@@ -7737,7 +8507,7 @@ class DuelSession:
         cpu_cards = team_cards[cpu_team]
 
         await self.send_message(
-            YO3_SERVER_DUEL,
+            YGO3_SERVER_DUEL,
             {
                 "duelRequestName": 0x15,
                 "FirstPlayer": first,
@@ -7766,7 +8536,13 @@ class DuelSession:
 
                 table_place = yo3_player | (0x0D << 8) | (index << 16)
                 await self.send_engine_command(
-                    1000, [uid, row if yo3_player == 0 else 0, 0, table_place]
+                    1000,
+                    [
+                        uid,
+                        row if yo3_player == 0 else 0,
+                        self._cid(row if yo3_player == 0 else 0),
+                        table_place,
+                    ],
                 )
 
             for index, (row, code) in enumerate(team_cards[team]["extra"]):
@@ -7776,7 +8552,13 @@ class DuelSession:
                 extra_pool[team].setdefault(code, []).append((uid, row))
                 table_place = yo3_player | (0x0C << 8) | (index << 16)
                 await self.send_engine_command(
-                    1000, [uid, row if yo3_player == 0 else 0, 0, table_place]
+                    1000,
+                    [
+                        uid,
+                        row if yo3_player == 0 else 0,
+                        self._cid(row if yo3_player == 0 else 0),
+                        table_place,
+                    ],
                 )
 
         self.team_to_client = dict(team_to_client)
@@ -7831,7 +8613,7 @@ class DuelSession:
 
                 if not candidates:
                     raise RuntimeError(
-                        f"No registered YO3 card for drawn OCG code {code}"
+                        f"No registered YGO3 card for drawn OCG code {code}"
                     )
 
                 uid, row = candidates.pop(0)
@@ -7848,7 +8630,13 @@ class DuelSession:
 
                 hand_place = player | (0x0B << 8) | (index << 16)
                 await self.send_engine_command(
-                    1000, [uid, row if player == 0 else 0, 0, hand_place]
+                    1000,
+                    [
+                        uid,
+                        row if player == 0 else 0,
+                        self._cid(row if player == 0 else 0),
+                        hand_place,
+                    ],
                 )
 
                 from_place = player | (0x0D << 1)
@@ -7872,7 +8660,7 @@ class DuelSession:
         await self.send_engine_command(5, [first, 0, 0, 0])
 
         log.info(
-            "[Duel] YO3 opening setup sent: first=%s hands=%s",
+            "[Duel] YGO3 opening setup sent: first=%s hands=%s",
             first,
             hand_index,
         )
@@ -7896,7 +8684,7 @@ class DuelSession:
 
     # Applies the winner's first/second choice and starts the duel.
     async def resolve_turn_order(self, order):
-        if order not in (YO3_FIRST, YO3_SECOND) or self.turn_order_complete:
+        if order not in (YGO3_FIRST, YGO3_SECOND) or self.turn_order_complete:
             return
 
         found = DUEL_MANAGER.find_duel_for_player(self.player_id)
@@ -7908,13 +8696,13 @@ class DuelSession:
         self.turn_order = order
         self.turn_order_complete = True
 
-        want_client_team = 0 if order == YO3_FIRST else 1
+        want_client_team = 0 if order == YGO3_FIRST else 1
         if 1 - int(duel.get("npc_seat", 1)) != want_client_team:
             duel_id, duel = await self._reseat(duel_id, duel)
 
         self.game_start_time = time.monotonic()
-        await self.send_duel_timer(0 if order == YO3_FIRST else 1)
-        await self.send_engine_command(YO3_FIRST_RESOLVE, [order, 0, 0, 0])
+        await self.send_duel_timer(0 if order == YGO3_FIRST else 1)
+        await self.send_engine_command(YGO3_FIRST_RESOLVE, [order, 0, 0, 0])
 
         await self.send_opening_setup(duel, order)
 
@@ -7977,7 +8765,7 @@ class DuelSession:
         response_payload = resp_rps(result)
 
         await self.send_engine_command(
-            YO3_Roshambo_RESOLVE, [result, self.cpu_hand, player_hand, 0]
+            YGO3_Roshambo_RESOLVE, [result, self.cpu_hand, player_hand, 0]
         )
         if result == 0:
             await self.send_duel_timer(
@@ -7987,10 +8775,10 @@ class DuelSession:
             return
         self.Roshambo_complete = True
         if result == 1:
-            await self.send_engine_command(YO3_FIRST_BEGIN, [1, 0, 0, 0])
+            await self.send_engine_command(YGO3_FIRST_BEGIN, [1, 0, 0, 0])
         else:
-            await self.send_engine_command(YO3_FIRST_BEGIN, [0, 0, 0, 0])
-            await self.resolve_turn_order(YO3_SECOND)
+            await self.send_engine_command(YGO3_FIRST_BEGIN, [0, 0, 0, 0])
+            await self.resolve_turn_order(YGO3_SECOND)
 
     # Reads the engine's first output into the opening state.
     async def process_initial_core_state(self, duel_id, duel):
@@ -8220,6 +9008,12 @@ class DuelSession:
         pool.setdefault(team, {}).setdefault(code, []).insert(0, (uid, row))
         return 0
 
+    @staticmethod
+    def _cid(row):
+        """The card's Konami id (the row's `cid`), 0 for a hidden card."""
+        card = GAME.cards.get(int(row)) if row else None
+        return int(card.cid) if card is not None else 0
+
     def _lookup(self, team, location, sequence, code):
         """(uid, row, position) of an OCG card, or None, without removing it."""
         team, location, sequence, code = (
@@ -8269,7 +9063,13 @@ class DuelSession:
         for i in range(start, len(pile)):
             uid, row = pile[i]
             await self.send_engine_command(
-                1000, [uid | (1 << 24), row, 0, self._table_place(player, zone, i)]
+                1000,
+                [
+                    uid | (1 << 24),
+                    row,
+                    self._cid(row),
+                    self._table_place(player, zone, i),
+                ],
             )
 
     async def _send_monster_record(self, player, zone, row):
@@ -8334,6 +9134,13 @@ class DuelSession:
         d_zone = self._zone(d_loc, d_seq)
         s_index = s_idx if s_zone in (0x0B, 0x0E, 0x0F) else 0
         s_position = int(src.get("position", old_pos)) if s_loc else d_pos
+
+        # A destroyed card (REASON_DESTROY, 0x1) leaving the field or the hand: CardVanish before its
+        # move, as the revival server sends it; without it the card stays drawn after a battle.
+        if int(msg.get("reason", 0)) & 0x1 and s_loc and s_zone <= 0x0B:
+            await self.send_engine_command(
+                0x1F, [s_player, s_zone | (s_index << 8), 0, 0]
+            )
 
         if s_loc in (LOC_GRAVE, LOC_REMOVED):
             await self._pile_refresh(s_team, s_loc, s_idx)
@@ -8406,6 +9213,20 @@ class DuelSession:
             team = int(msg.get("player", 0))
             self.turn_team = team
             self.phase_index = None
+            if isinstance(self._banter, dict):
+                # Older/partially initialized banter state must never crash a duel.
+                # setdefault also repairs state created before these fields existed.
+                b = self._banter
+                b.setdefault("started", False)
+                b.setdefault("turn_reactions", 0)
+                b.setdefault("next", 0.0)
+                if not b.get("started", False):
+                    b["started"] = True
+                    self._say("greet", delay=4.0)
+                if team == self._banter_team():
+                    b["turn_reactions"] = 0
+                    if self.turn_count > 0:
+                        self._say("turn", delay=2.0)
             await self.reset_timer()
             await self.send_duel_timer(self._cp(team))
 
@@ -8484,17 +9305,18 @@ class DuelSession:
             found = self._lookup(team, LOC_MZONE, seq, msg.get("code", 0))
             if found:
                 player = self._cp(team)
-                if t == MSG["SUMMONING"]:
-                    await self.send_engine_command(
-                        0x38,
-                        [player | (self._zone(LOC_MZONE, seq) << 1), found[0], 0, 0],
-                    )
-                else:
-                    # Like 0x38 the effect plays at the monster's zone (0x514E5A), not only at the player.
-                    await self.send_engine_command(
-                        0x39,
-                        [player | (self._zone(LOC_MZONE, seq) << 1), found[0], 0, 0],
-                    )
+                # The place as moves give it, with its face and position bits (Konami's logs: 0x4000 | place);
+                # the effect plays at that zone (0x514E5A).
+                place = self._place_word(
+                    player,
+                    self._zone(LOC_MZONE, seq),
+                    0,
+                    int(msg.get("position", POS_FACEUP_ATTACK)) or POS_FACEUP_ATTACK,
+                )
+                await self.send_engine_command(
+                    0x38 if t == MSG["SUMMONING"] else 0x39,
+                    [place, found[0], 0, 0],
+                )
         elif t == MSG["POS_CHANGE"]:
             await self._on_position(
                 int(msg.get("controller", 0)),
@@ -8516,12 +9338,27 @@ class DuelSession:
             amount = int(msg.get("amount", 0))
 
             delta = amount if t == MSG["RECOVER"] else -amount
+            self._lp[player] = max(0, self._lp.get(player, 8000) + delta)
 
-            # param3 stays 0: a non-zero value opens an LP pop-up on the client that
-            # never closes (the LP text stuck on screen), and the reference server sends 0.
-            await self.send_engine_command(
-                0x10, [self._cp(player), delta & 0xFFFFFFFF, 0, 0]
-            )
+            if LP_ANIMATION:
+                # As Konami's server sent it: the change shown (param3's low byte 1: its number and sound),
+                # the avatar's damage line (0x4D), then the change applied (low byte 0). The shown half
+                # alone leaves the LP pop-up open, which is why one message with 0 was used before.
+                kind = (
+                    4
+                    if t == MSG["RECOVER"]
+                    else 2 if t == MSG["PAY_LPCOST"] else 1 if self._in_battle else 0
+                )
+                change = delta & 0xFFFFFFFF
+                cp = self._cp(player)
+                await self.send_engine_command(0x10, [cp, change, (kind << 8) | 1, 0])
+                await self.send_engine_command(0x4D, [cp, change, kind, 0])
+                await self.send_engine_command(0x10, [cp, change, kind << 8, 0])
+            else:
+                # param3 stays 0: no pop-up, and the LP changes silently.
+                await self.send_engine_command(
+                    0x10, [self._cp(player), delta & 0xFFFFFFFF, 0, 0]
+                )
 
             try:
                 found = DUEL_MANAGER.find_duel_for_player(self.player_id)
@@ -8537,6 +9374,7 @@ class DuelSession:
         elif t == MSG["LPUPDATE"]:
             player = int(msg.get("player", 0))
             lp = int(msg.get("lp", 0))
+            self._lp[player] = lp
 
             await self.send_engine_command(0x0F, [self._cp(player), lp, 0, 0])
 
@@ -8575,11 +9413,44 @@ class DuelSession:
                 )
             else:
                 t_player, t_zone = 1 - player, 16
+                if (
+                    self._banter
+                    and int(card.get("controller", 0)) == self._banter_team()
+                ):
+                    self._say("direct", delay=4.0, reaction=True)
+            self._in_battle = True
             await self.send_engine_command(0xA, [0, 0, 0, 0])
             await self.send_engine_command(
                 0xC, [player | (zone << 8), t_player, t_zone, 0]
             )
+        elif t == MSG["BATTLE"]:
+            # The battle's run step (0xD): the damage each player takes, by ATK against ATK, or DEF when the
+            # target defends (effects that change it are not followed). The client pairs the figures with
+            # the two cards and then shows the outcome; without it the battle never resolves on screen. A
+            # card's destruction is shown by the MOVE that confirms it, not by this message.
+            card, target = msg.get("card", {}), msg.get("target", {})
+            if not int(target.get("location", 0)):
+                await self.send_engine_command(
+                    0xD, [0, 0, 0, 0]
+                )  # a direct attack: the LP change shows it
+            else:
+                if int(target.get("position", 0)) & (
+                    POS_FACEUP_ATTACK | POS_FACEDOWN_ATTACK
+                ):
+                    diff = int(card.get("attack", 0)) - int(target.get("attack", 0))
+                    to_attacker, to_target = max(-diff, 0), max(diff, 0)
+                else:
+                    to_attacker = max(
+                        int(target.get("defense", 0)) - int(card.get("attack", 0)), 0
+                    )
+                    to_target = 0
+                damage = [0, 0]
+                attacker = self._cp(card.get("controller", 0))
+                damage[attacker] = to_attacker
+                damage[1 - attacker] = to_target
+                await self.send_engine_command(0xD, [damage[0], damage[1], 0, 0])
         elif t in (MSG["DAMAGE_STEP_END"], MSG["ATTACK_DISABLED"]):
+            self._in_battle = False
             await self.send_engine_command(0xE, [0, 0, 0, 0])
         elif t == MSG["CHAINING"]:
             loc = int(msg.get("location", 0))
@@ -8597,19 +9468,48 @@ class DuelSession:
                 )
                 else 16
             )
+            link_player = self._cp(msg.get("controller", 0))
+            # CardActivate: the card's activation effect by its type, before the ChainSet (Konami's server
+            # sent it for every Spell/Trap activation). Its place is face up, as moves give it.
+            if loc in (LOC_MZONE, LOC_SZONE) and zone <= 10:
+                found = self._lookup(
+                    msg.get("controller", 0),
+                    loc,
+                    msg.get("sequence", 0),
+                    msg.get("code", 0),
+                )
+                if found:
+                    await self.send_engine_command(
+                        0x22,
+                        [
+                            self._place_word(link_player, zone, 0, POS_FACEUP_ATTACK),
+                            self._cid(found[1]),
+                            found[0],
+                            0,
+                        ],
+                    )
+            self._chain_links.append((link_player, zone))
             await self.send_engine_command(
                 0x33,
-                [
-                    self._cp(msg.get("controller", 0)),
-                    zone,
-                    int(msg.get("chain_size", 1)),
-                    0,
-                ],
+                [link_player, zone, int(msg.get("chain_size", 1)), 0],
             )
         elif t == MSG["CHAIN_SOLVING"]:
-            await self.send_engine_command(
-                0x34, [0, 0, int(msg.get("chain_size", 1)), 0]
+            # The resolving link's own {player, zone, link}, as its ChainSet (Konami's logs).
+            n = int(msg.get("chain_size", 1))
+            player, zone = (
+                self._chain_links[n - 1] if 0 < n <= len(self._chain_links) else (0, 0)
             )
+            await self.send_engine_command(0x34, [player, zone, n, 0])
+        elif t == MSG["CHAIN_END"]:
+            self._chain_links = []
+        elif t == MSG["SET"]:
+            # CardSet: the Set effect after a Set's move (Konami's server sent it).
+            loc = int(msg.get("location", 0))
+            if loc in (LOC_MZONE, LOC_SZONE):
+                zone = self._zone(loc, msg.get("sequence", 0))
+                await self.send_engine_command(
+                    0x1E, [self._cp(msg.get("controller", 0)), zone, int(zone < 5), 0]
+                )
         elif t == MSG["WIN"]:
             winner = int(msg.get("player", 0))
             if winner not in (0, 1):
@@ -8625,7 +9525,7 @@ class DuelSession:
     @staticmethod
     def _end_reason(reason):
         return {
-            0: 5,  # surrendered
+            0: 12,  # surrendered (Konami's logs: 12)
             1: 1,  # Life Points reduced to 0
             2: 2,  # ran out of cards in the Deck
             3: 11,  # ran out of time
@@ -8639,6 +9539,103 @@ class DuelSession:
         }.get(
             reason, 8
         )  # "has won with" a card
+
+    # --- LLM-generated NPC chat -----------------------------------------------------------------------
+    def _banter_setup(self, duel):
+        """Set up the NPC chat identity; dialogue comes only from the LLM decision."""
+        if self._banter is not None:
+            return
+        self._banter = False
+        virtual = duel.get("npc_player_id")
+        if not ANNOUNCE_ENABLED or not virtual:
+            return
+        npc_id = int(virtual) - 0x70000000
+        if npc_id < NPC_FIRST_ID:
+            return
+        name = str(
+            GAME.texts.get(NPC_NAME_TEXT + 2 * ((npc_id - NPC_FIRST_ID) // 3), "")
+        ).strip()
+        name = name or f"NPC {npc_id}"
+        self._banter = {
+            "id": npc_id,
+            "name": name,
+            "next": 0.0,
+            "started": False,
+            "turn_reactions": 0,
+        }
+        log.info("[Chat] LLM announcements enabled for NPC %s (%s)", npc_id, name)
+
+    def _banter_team(self):
+        return 1 - self._client_team  # the engine team the NPC plays
+
+    def _banter_player_name(self):
+        session = STATE.online.get(self.player_id)
+        try:
+            return str(session.account.username) or "duelist"
+        except Exception:
+            return "duelist"
+
+    def _say(self, kind, delay=1.0, card=None, reaction=False):
+        """Scripted NPC dialogue has been removed; LLM announcements use _announce()."""
+        return
+
+    def _announce(self, action, selected, reason):
+        """The NPC says in the duel chat what it is playing, from the LM Studio decision it just made.
+        A card it Sets stays unnamed (the opponent must not see it) and so does the model's reason for it.
+        """
+        b = self._banter
+        if not b or not ANNOUNCE_ENABLED:
+            return
+        name = (
+            selected.get("name")
+            or (selected.get("attacker") or {}).get("name")
+            or "a monster"
+        )
+        sentence = ""
+        if action in ("summon", "activate", "attack"):
+            # Show the complete LLM reason in the duel chat, not just its first
+            # sentence or an arbitrary 140-character prefix.
+            sentence = " ".join(str(reason or "").split())
+        if action == "summon":
+            line = f"I summon {name}!"
+        elif action == "activate":
+            line = f"I activate {name}!"
+        elif action == "attack":
+            line = f"{name}, attack!"
+        elif action == "monster_set":
+            line = "I set a monster face-down."
+        elif action == "spell_set":
+            line = "I set a card."
+        else:
+            return
+        if sentence:
+            line += " " + sentence
+        asyncio.create_task(self._banter_send(line, 1.5))
+
+    async def _banter_send(self, text, delay):
+        b = self._banter
+        try:
+            loop = asyncio.get_running_loop()
+            due = max(loop.time() + delay, b["next"])
+            b["next"] = due + BANTER_GAP
+            await asyncio.sleep(max(0.0, due - loop.time()))
+            STATE.online_push(
+                self.player_id,
+                0x2455,
+                {},
+                [
+                    MessageRecord(
+                        fields={
+                            "from_id": b["id"],
+                            "pname": b["name"],
+                            "chat_type": 0,
+                            "chat_str": text,
+                        }
+                    )
+                ],
+            )
+        except Exception:
+            log.exception("[Chat] Could not send an NPC line")
 
     async def _finish_duel(self, result, reason):
         """Command 2 on the duel connection and 0x2009 on the front connection."""
@@ -8724,6 +9721,13 @@ class DuelSession:
         if front is not None:
             front.npc_native_duel_id = None
         log.info("[Duel] Duel over: result=%s reason=%s", result, reason)
+        # The NPC's closing line goes out well after the result, so nothing else is on the front connection
+        # while the result screen opens.
+        try:
+            if self._banter and result in (1, 2):
+                self._say("lose" if result == 1 else "win", delay=8.0)
+        except Exception:
+            log.exception("[Chat] Could not queue the closing line")
 
     async def _retry_result_push(self, duel_data):
         for _ in range(40):
@@ -8823,7 +9827,7 @@ class DuelSession:
                 add(self._table_place(player, 0x0F), 11)
         if any(self.extra_pool.get(client, {}).values()):
             add(self._table_place(0, 0x0C), 11)
-        # Surrender (bit 10): the card menu has the entry, it is on the player's own Deck pile.
+        # Surrender (bit 10): the card menu has the entry, but where the original offered it is unknown, so it is on the player's own Deck pile.
         add(self._table_place(0, 0x0D), 10)
 
         raw = bytearray()
@@ -8832,7 +9836,7 @@ class DuelSession:
         for key, value in flags:
             raw.extend(struct.pack("BB", key, value))
         await self.send_message(
-            YO3_SERVER_DUEL,
+            YGO3_SERVER_DUEL,
             {
                 "duelRequestName": 0x12,
                 "comIDsize": len(commands),
@@ -9058,6 +10062,21 @@ class DuelSession:
         """
         t = prompt["type"]
         if t == MSG["SELECT_IDLECMD"]:
+            # Spells first (each card is tried once a turn, so one that needs an answer the CPU cannot
+            # give is not retried forever).
+            if self._cpu_tried_turn != self.turn_count:
+                self._cpu_tried, self._cpu_tried_turn = set(), self.turn_count
+            for i, act in enumerate(prompt.get("activates", [])):
+                key = (
+                    act["code"],
+                    act["location"],
+                    act["sequence"],
+                    act["description"],
+                )
+                if key in self._cpu_tried or not self._cpu_wants_spell(act):
+                    continue
+                self._cpu_tried.add(key)
+                return resp_idle(5, i)
             if prompt.get("summons"):
                 return resp_idle(0, 0)
             if prompt.get("monster_sets"):
@@ -9088,7 +10107,551 @@ class DuelSession:
             if attack_index is not None:
                 return resp_battle(1, attack_index)
             return resp_battle(3) if prompt.get("to_ep") else resp_battle(2)
+        if t == MSG["SELECT_CHAIN"] and not prompt.get("forced"):
+            # Chain a Trap or a Quick-Play Spell when the engine offers one.
+            for i, sel in enumerate(prompt.get("selects", [])):
+                if self._cpu_card_type(sel["code"]) & (0x4 | 0x10000):
+                    return resp_chain(i)
         return self._default_answer(prompt)
+
+    # Sends a message explaining the NPC's duel decision.
+    async def _npc_chat(self, message):
+        log.info("[NPC Chat] %s", message)
+
+    # Sends a chat request to the local LM Studio server.
+    async def _lm_chat(self, prompt_text):
+        self._lm_reasoning = ""
+        import json
+        import re
+        import urllib.request
+        import urllib.error
+
+        if not LM_STUDIO_URL or not LM_STUDIO_MODEL:
+            return None
+
+        url = LM_STUDIO_URL.rstrip("/") + "/chat/completions"
+
+        payload = {
+            "model": LM_STUDIO_MODEL,
+            "messages": [{"role": "user", "content": prompt_text}],
+            "temperature": 0.1,
+            "max_tokens": 1500,  # room for a reasoning model to think and still answer
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+        }
+
+        if LM_STUDIO_API_KEY:
+            headers["Authorization"] = "Bearer " + LM_STUDIO_API_KEY
+
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        def send_request():
+            try:
+                # Use the full configured NPC_AI_TIMEOUT with a minimum floor of 30s
+                with urllib.request.urlopen(
+                    request,
+                    timeout=max(NPC_AI_TIMEOUT, 30),
+                ) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+
+                choice = result["choices"][0]
+                message = choice.get("message") or {}
+                content = message.get("content") or ""
+
+                # LM Studio returns a reasoning model's thinking separately (reasoning_content), or
+                # inline in <think>...</think> blocks.
+                reasoning = str(message.get("reasoning_content") or "")
+                think = re.search(
+                    r"<think>(.*?)(?:</think>|$)", content, flags=re.DOTALL
+                )
+                if think and not reasoning:
+                    reasoning = think.group(1)
+                self._lm_reasoning = " ".join(reasoning.split())
+
+                # Strip <think> blocks, including one that was cut off by the token limit.
+                content = re.sub(
+                    r"<think>.*?(?:</think>|$)", "", content, flags=re.DOTALL
+                )
+
+                # Strip markdown code blocks if present
+                content = re.sub(r"```json|```", "", content).strip()
+
+                if not content:
+                    log.warning(
+                        "[AI] LM Studio returned no answer (finish_reason=%s). A reasoning model may "
+                        "have used all %s tokens thinking; raise max_tokens or use a non-reasoning model.",
+                        choice.get("finish_reason"),
+                        payload["max_tokens"],
+                    )
+                    return None
+
+                return content
+
+            except Exception as e:
+                log.error("[AI] LM Studio request failed: %s", e)
+                print(f"[LM Studio Error]: {e}", flush=True)
+                return None
+
+        return await asyncio.to_thread(send_request)
+
+    def _enrich_options_with_card_info(self, options):
+        import sqlite3
+
+        db_path = os.environ.get("YGO3_CARD_DB", "")
+        if not db_path or not os.path.isfile(db_path):
+            return options
+
+        # Collect all card IDs present in options
+        card_ids = {
+            opt["code"]
+            for opt in options
+            if isinstance(opt, dict) and "code" in opt and opt["code"]
+        }
+        if not card_ids:
+            return options
+
+        card_info = {}
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            placeholders = ",".join("?" for _ in card_ids)
+            query = f"""
+                SELECT d.id, t.name, d.atk, d.def, d.level, t.desc
+                FROM datas d
+                JOIN texts t ON d.id = t.id
+                WHERE d.id IN ({placeholders})
+            """
+            for cid, name, atk, defense, level, desc in cur.execute(
+                query, tuple(card_ids)
+            ):
+                # Keep description brief to save prompt tokens
+                short_desc = (desc or "").replace("\r\n", " ").replace("\n", " ")[:160]
+                card_info[cid] = {
+                    "name": name,
+                    "atk": atk,
+                    "def": defense,
+                    "level": level & 0xFF,
+                    "effect": short_desc,
+                }
+            conn.close()
+        except Exception as e:
+            print(f"[LM Studio DB Lookup Warning]: {e}")
+            return options
+
+        enriched = []
+        for opt in options:
+            if isinstance(opt, dict) and opt.get("code") in card_info:
+                item = opt.copy()
+                item.update(card_info[opt["code"]])
+                enriched.append(item)
+            else:
+                enriched.append(opt)
+        return enriched
+
+    # Name, type and stats of a card (cards.cdb) for the model's prompt.
+    def _lm_card_info(self, code):
+        code = int(code or 0)
+        if code in self._lm_cards:
+            return self._lm_cards[code]
+        info = {
+            "name": f"card {code}",
+            "kind": "?",
+            "atk": "?",
+            "def": "?",
+            "level": "?",
+            "effect": "",
+        }
+        engine = DUEL_ENGINE
+        try:
+            database = engine.database
+            with database.lock:
+                row = database.connection.execute(
+                    "SELECT d.type, d.atk, d.def, d.level, t.name, t.desc FROM datas d "
+                    "JOIN texts t ON d.id = t.id WHERE d.id = ?",
+                    (code,),
+                ).fetchone()
+            if row is not None:
+                card_type, atk, defense, level, name, desc = row
+                card_type = int(card_type)
+                info = {
+                    "name": name,
+                    "kind": (
+                        "Monster"
+                        if card_type & 0x1
+                        else "Spell" if card_type & 0x2 else "Trap"
+                    ),
+                    "atk": atk,
+                    "def": defense,
+                    "level": int(level) & 0xFF,
+                    "effect": " ".join((desc or "").split())[:140],
+                }
+        except Exception:
+            pass
+        self._lm_cards[code] = info
+        return info
+
+    def _lm_state_text(self, me):
+        """The duel as the model needs it: life points, both fields, its own hand and Graveyard."""
+        opp = 1 - me
+
+        def card_text(code, position=None):
+            info = self._lm_card_info(code)
+            if info["kind"] != "Monster":
+                return f'{info["name"]} ({info["kind"]})'
+            text = f'{info["name"]} (ATK {info["atk"]}/DEF {info["def"]}, level {info["level"]}'
+            if position is not None:
+                text += (
+                    ", defense position"
+                    if position & (POS_FACEUP_DEFENSE | POS_FACEDOWN_DEFENSE)
+                    else ", attack position"
+                )
+            return text + ")"
+
+        def zone(team, location):
+            out = []
+            for (t, loc, _seq), entry in sorted(self.m_field.items()):
+                if t != team or loc != location:
+                    continue
+                position = int(entry[2])
+                if team != me and position & (
+                    POS_FACEDOWN_ATTACK | POS_FACEDOWN_DEFENSE
+                ):
+                    out.append("a face-down card")
+                else:
+                    out.append(
+                        card_text(
+                            self.uid_to_code.get(entry[0], 0),
+                            position if location == LOC_MZONE else None,
+                        )
+                    )
+            return "; ".join(out) or "none"
+
+        def pile(team, location, names):
+            cards = self.m_pile.get((team, location), [])
+            if not names:
+                return str(len(cards))
+            listed = ", ".join(
+                self._lm_card_info(self.uid_to_code.get(e[0], 0))["name"]
+                for e in cards[-8:]
+            )
+            return f"{len(cards)}" + (f" ({listed})" if listed else "")
+
+        hand = (
+            "; ".join(card_text(self.uid_to_code.get(e[0], 0)) for e in self.m_hand[me])
+            or "empty"
+        )
+        return (
+            f"GAME STATE (you are Player {me}; turn {self.turn_count}):\n"
+            f"Life Points - you: {self._lp.get(me, 8000)}, opponent: {self._lp.get(opp, 8000)}\n"
+            f"Your monsters: {zone(me, LOC_MZONE)}\n"
+            f"Opponent monsters: {zone(opp, LOC_MZONE)}\n"
+            f"Your Spell/Trap cards: {zone(me, LOC_SZONE)}\n"
+            f"Opponent Spell/Trap cards: {zone(opp, LOC_SZONE)}\n"
+            f"Your hand: {hand}\n"
+            f"Opponent hand size: {len(self.m_hand[opp])}\n"
+            f"Your Graveyard: {pile(me, LOC_GRAVE, True)}; opponent Graveyard: {pile(opp, LOC_GRAVE, True)}"
+        )
+
+    # Asks LM Studio to choose from legal main-phase and battle actions.
+    async def _lm_cpu_answer(self, prompt):
+        import json
+        import re
+
+        t = prompt.get("type")
+
+        # Let the built-in CPU handle chain responses immediately.
+        if t == MSG["SELECT_CHAIN"]:
+            return None
+
+        # LM Studio only handles prompt types with known response encoders.
+        if t not in (
+            MSG["SELECT_IDLECMD"],
+            MSG["SELECT_BATTLECMD"],
+        ):
+            return None
+
+        options = []
+
+        if t == MSG["SELECT_IDLECMD"]:
+            for i, act in enumerate(prompt.get("activates", [])):
+                options.append(
+                    {
+                        "action": "activate",
+                        "index": i,
+                        "card": act.get("code"),
+                        "description": act.get("description"),
+                        "location": act.get("location"),
+                        "sequence": act.get("sequence"),
+                    }
+                )
+
+            for i, act in enumerate(prompt.get("summons", [])):
+                options.append(
+                    {
+                        "action": "summon",
+                        "index": i,
+                        "card": act.get("code"),
+                        "description": act.get("description"),
+                    }
+                )
+
+            for i, act in enumerate(prompt.get("monster_sets", [])):
+                options.append(
+                    {
+                        "action": "monster_set",
+                        "index": i,
+                        "card": act.get("code"),
+                        "description": act.get("description"),
+                    }
+                )
+
+            for i, act in enumerate(prompt.get("spell_sets", [])):
+                options.append(
+                    {
+                        "action": "spell_set",
+                        "index": i,
+                        "card": act.get("code"),
+                        "description": act.get("description"),
+                    }
+                )
+
+            if prompt.get("to_bp"):
+                options.append({"action": "battle_phase"})
+
+            options.append({"action": "end_turn"})
+
+        elif t == MSG["SELECT_BATTLECMD"]:
+            for i, attack in enumerate(prompt.get("attacks", [])):
+                options.append(
+                    {
+                        "action": "attack",
+                        "index": i,
+                        "attacker": attack,
+                    }
+                )
+
+            if prompt.get("to_ep"):
+                options.append({"action": "end_phase"})
+            else:
+                options.append({"action": "main_phase_2"})
+
+        if not options:
+            return None
+
+        player = int(prompt.get("player", 0))
+
+        # Names and stats instead of bare card numbers.
+        for option in options:
+            code = option.get("card")
+            if code:
+                info = self._lm_card_info(code)
+                option["name"] = info["name"]
+                option["type"] = info["kind"]
+                if info["kind"] == "Monster":
+                    option["atk"], option["def"] = info["atk"], info["def"]
+                elif info["effect"]:
+                    option["effect"] = info["effect"]
+            attacker = option.get("attacker")
+            if isinstance(attacker, dict) and attacker.get("code"):
+                info = self._lm_card_info(attacker["code"])
+                attacker["name"], attacker["atk"], attacker["def"] = (
+                    info["name"],
+                    info["atk"],
+                    info["def"],
+                )
+
+        # Use the actual duel turn supplied by the prompt, if available.
+        turn_number = (
+            prompt.get("turn")
+            or prompt.get("turn_count")
+            or prompt.get("turn_number")
+            or self.turn_count
+            or "Unknown"
+        )
+
+        # ONE prompt: the role, the duel, the legal actions and the rules together (no separate system prompt).
+        prompt_text = (
+            LM_DUEL_ROLE
+            + "\n\n"
+            + self._lm_state_text(player)
+            + "\n\n"
+            + "PROMPT TYPE: "
+            + str(MSG_NAME.get(t, t))
+            + "\n\n"
+            + "AVAILABLE ACTIONS:\n"
+            + json.dumps(options, separators=(",", ":"), default=str)
+            + "\n\n"
+            + LM_DUEL_RULES
+        )
+
+        try:
+            answer = await self._lm_chat(prompt_text)
+
+            if not answer:
+                return None
+
+            # Extract the JSON response.
+            match = re.search(r"\{.*\}", answer, re.DOTALL)
+            if not match:
+                log.warning(
+                    "[AI] Could not find JSON in LM Studio response: %s", answer
+                )
+                return None
+
+            choice = json.loads(match.group(0))
+
+            action = str(choice.get("action", "")).lower()
+            index = choice.get("index", 0)
+            reason = str(choice.get("reason", "No explanation provided."))
+
+            if action in ("battle_phase", "end_turn", "end_phase", "main_phase_2"):
+                index = 0  # these actions have no index to match
+            elif not isinstance(index, int) or isinstance(index, bool):
+                return None
+
+            # Verify the action is one of the legal options.
+            selected = next(
+                (
+                    option
+                    for option in options
+                    if option["action"] == action and option.get("index", 0) == index
+                ),
+                None,
+            )
+
+            if selected is None:
+                log.warning(
+                    "[AI] LM Studio returned an invalid action: %s",
+                    answer,
+                )
+                return None
+
+            # Build a readable GUI log entry.
+            action_names = {
+                "activate": "ACTIVATE",
+                "summon": "SUMMON",
+                "monster_set": "MONSTER SET",
+                "spell_set": "SPELL SET",
+                "battle_phase": "BATTLE PHASE",
+                "end_turn": "END TURN",
+                "attack": "ATTACK",
+                "end_phase": "END PHASE",
+                "main_phase_2": "MAIN PHASE 2",
+            }
+
+            # The card's name and number (the option's own `description` is only an effect text id).
+            attacker = selected.get("attacker") or {}
+            card_name = selected.get("name") or attacker.get("name")
+            card_code = selected.get("card") or attacker.get("code")
+            if card_name and card_code:
+                card_description = f"{card_name} ({card_code})"
+                if action == "attack":
+                    card_description += f", ATK {attacker.get('atk', '?')}"
+                    if attacker.get("can_direct"):
+                        card_description += ", direct attack"
+            else:
+                card_description = str(card_code or selected.get("description") or "")
+
+            log_entry = (
+                f"TURN {turn_number}\n"
+                f"PLAYER: {player}\n"
+                f"ACTION: {action_names.get(action, action.upper())}\n"
+                f"INDEX: {index}\n"
+            )
+
+            if card_description:
+                log_entry += f"CARD: {card_description}\n"
+
+            log_entry += f"REASON: {reason}"
+
+            thinking = getattr(self, "_lm_reasoning", "")
+            if thinking:
+                # The model's own thinking, shortened for the LM Studio Logs tab.
+                log_entry += "\nTHINKING: " + (
+                    thinking if len(thinking) <= 700 else thinking[:700] + "..."
+                )
+
+            # These markers are read by the launcher's LM Studio Logs tab.
+            try:
+                print("[LLM_RESPONSE_BEGIN]", flush=True)
+                print(log_entry, flush=True)
+                print("[LLM_RESPONSE_END]", flush=True)
+            except Exception:
+                log.exception("[AI] Could not print the LM Studio log entry")
+
+            # The model does not see stats, so an attack it picks is checked like the built-in AI's: a
+            # monster that would lose to something the opponent controls stays home.
+            if action == "attack":
+                attacks = prompt.get("attacks", [])
+                if (
+                    0 <= index < len(attacks)
+                    and not attacks[index].get("can_direct")
+                    and not self._cpu_attack_is_safe(player, attacks[index])
+                ):
+                    log.info(
+                        "[AI] LM Studio attack %d is unsafe; using the built-in AI instead",
+                        index,
+                    )
+                    return None
+
+            self._announce(action, selected, reason)
+
+            # Return the original game response unchanged.
+            if action == "activate":
+                return resp_idle(5, index)
+
+            if action == "summon":
+                return resp_idle(0, index)
+
+            if action == "monster_set":
+                return resp_idle(3, index)
+
+            if action == "spell_set":
+                return resp_idle(4, index)
+
+            if action == "battle_phase":
+                return resp_idle(6)
+
+            if action == "end_turn":
+                return resp_idle(7)
+
+            if action == "attack":
+                return resp_battle(1, index)
+
+            if action == "end_phase":
+                return resp_battle(3)
+
+            if action == "main_phase_2":
+                return resp_battle(2)
+
+        except Exception:
+            log.exception("[AI] LM Studio decision failed")
+
+        return None
+
+    # The OCG type bits of a card (cards.cdb), 0 when unknown.
+    def _cpu_card_type(self, code):
+        engine = DUEL_ENGINE
+        if engine is None:
+            return 0
+        try:
+            row = engine.database.get_card(int(code))
+        except Exception:
+            return 0
+        return int(row["type"]) if row is not None else 0
+
+    def _cpu_wants_spell(self, activation):
+        """A Spell the CPU can play without choices it cannot make: not an Equip (0x40000) or Ritual
+        (0x80) Spell, and no monster or Trap effects."""
+        t = self._cpu_card_type(activation["code"])
+        return bool(t & 0x2) and not t & (0x40000 | 0x80)
 
     async def _prompt_for_client(self, duel, prompt, events):
         """Show a prompt on the client. Returns an answer when the client has no
@@ -9112,12 +10675,37 @@ class DuelSession:
                     uid = entries[0][0]
                     break
             if not uid:
-                for entry in list(self.m_hand[team]) + [
-                    (v[0], v[1]) for v in self.m_field.values()
-                ]:
+                # The card may be coming from the Graveyard or the banished pile (Monster Reborn and the
+                # like), which hold their cards in m_pile, so those are searched too.
+                piles = [
+                    entry
+                    for (pile_team, _loc), entries in self.m_pile.items()
+                    if pile_team == team
+                    for entry in entries
+                ]
+                for entry in (
+                    list(self.m_hand[team])
+                    + [(v[0], v[1]) for v in self.m_field.values()]
+                    + piles
+                ):
                     if self.uid_to_code.get(entry[0]) == int(prompt.get("code", 0)):
                         uid = entry[0]
                         break
+            if not uid:
+                # Last resort: any card with this code, so the dialog is never sent for card 0.
+                uid = next(
+                    (
+                        u
+                        for u, c in self.uid_to_code.items()
+                        if c == int(prompt.get("code", 0))
+                    ),
+                    0,
+                )
+                log.warning(
+                    "[Duel] SELECT_POSITION: card %s not in the mirror; using uid %s",
+                    prompt.get("code"),
+                    uid,
+                )
             self.pending_response_kind = "position"
             positions = int(prompt.get("positions", 0))
             flag = (1 << 16) if positions & POS_FACEUP_DEFENSE else 0
@@ -9207,41 +10795,118 @@ class DuelSession:
             return await self._prompt_for_client(duel, prompt, events)
         return None
 
+    # Translates engine output and lets LM Studio control the CPU, with fallback AI.
     async def _pump(self, duel_id, duel, events, status):
-        """Translate engine output for the client; answer the CPU's prompts (and
-        those the client has no window for) until the client has to act."""
+        self._banter_setup(duel)
         for _ in range(600):
             auto = await self._translate(duel, events)
+
             if status == OCG_DUEL_STATUS_END:
                 duel["ended"] = True
                 if not self.duel_ended:
                     await self._finish_duel(3, 0)
                 return
+
             if self.duel_ended:
                 return
+
             prompt = duel.get("pending_prompt")
             if prompt is None:
                 return
-            if int(prompt.get("player", 0)) == self._client_team:
+
+            prompt_name = MSG_NAME.get(prompt["type"], prompt["type"])
+
+            prompt_player = int(prompt.get("player", 0))
+            client_team = int(self._client_team)
+
+            log.info(
+                "[Duel] Prompt ownership: prompt_player=%s client_team=%s type=%s",
+                prompt_player,
+                client_team,
+                prompt_name,
+            )
+
+            # Human player: never send their decisions to LM Studio.
+            if prompt_player == client_team:
+                log.info(
+                    "[Duel] Waiting for human response: %s",
+                    prompt_name,
+                )
+
                 if auto is None:
                     return
+
                 response = auto
+
+            # CPU player: ask LM Studio, then use built-in AI if necessary.
             else:
-                response = self._cpu_answer(prompt)
+                log.info(
+                    "[Duel] CPU response required: %s",
+                    prompt_name,
+                )
+
+                response = None
+
+                # Try LM Studio first.
+                if NPC_AI_ENABLED and NPC_AI_AVAILABLE:
+                    try:
+                        log.info(
+                            "[AI] LM Studio thinking: %s",
+                            prompt_name,
+                        )
+
+                        result = self._lm_cpu_answer(prompt)
+
+                        if asyncio.iscoroutine(result):
+                            response = await result
+                        else:
+                            response = result
+
+                        if response is not None:
+                            log.info(
+                                "[AI] LM Studio answered %s",
+                                prompt_name,
+                            )
+
+                    except Exception:
+                        log.exception(
+                            "[AI] LM Studio failed on %s",
+                            prompt_name,
+                        )
+
+                # Fall back to the built-in CPU AI.
+                if response is None:
+                    log.info(
+                        "[AI] Using built-in CPU fallback: %s",
+                        prompt_name,
+                    )
+                    response = self._cpu_answer(prompt)
+
+                if response is not None:
+                    log.info(
+                        "[AI] Final response for %s: %s",
+                        prompt_name,
+                        response,
+                    )
+
             if response is None:
                 log.error(
                     "[Duel] Nobody can answer %s",
-                    MSG_NAME.get(prompt["type"], prompt["type"]),
+                    prompt_name,
                 )
                 return
+
             status, raw = DUEL_MANAGER.respond_duel(duel_id, response)
+
             events = parse_messages(raw, strict=False) if raw else []
             duel["ocg_status"] = status
+
             if events:
                 log.info(
                     "[Duel] Engine: %s",
                     [MSG_NAME.get(m["type"], m["type"]) for m in events],
                 )
+
         log.error("[Duel] The prompt loop did not settle after 600 answers")
 
     # Answers the engine and pumps it until the next prompt.
@@ -9357,7 +11022,9 @@ class DuelSession:
             return
         if command == 10:
             log.info("[Duel] The player surrendered")
-            await self._finish_duel(2, 5)  # a loss, "has surrendered" (text 2004)
+            await self._finish_duel(
+                2, 12
+            )  # a loss; Konami's logs end a surrender on 12, never 5
             return
         if command in (1, 12, 13):
             return
@@ -9540,20 +11207,22 @@ class DuelSession:
         request_id = fields.get("request")
         command_name = fields.get("duelRequestName")
         found = DUEL_MANAGER.find_duel_for_player(player_id)
-        if found is None or request_id != YO3_CLIENT_DUEL:
+        if found is None or request_id != YGO3_CLIENT_DUEL:
             return
 
         duel_id, duel = found
 
-        if command_name == YO3_SELECT_HAND:
+        if command_name == YGO3_SELECT_HAND:
             if not self.Roshambo_complete and isinstance(fields.get("selectHand"), int):
                 await self.resolve_Roshambo(fields["selectHand"])
             return
 
-        if command_name == YO3_SELECT_FIRST:
+        if command_name == YGO3_SELECT_FIRST:
             if self.Roshambo_complete and not self.turn_order_complete:
                 choice = fields.get("player", fields.get("choice", 0))
-                await self.resolve_turn_order(YO3_FIRST if choice == 1 else YO3_SECOND)
+                await self.resolve_turn_order(
+                    YGO3_FIRST if choice == 1 else YGO3_SECOND
+                )
             return
 
         if command_name == 0x0F:
@@ -9629,7 +11298,7 @@ class DuelSession:
                 if request_id != 0x2724:
                     break
 
-            if request_id != YO3_ENTER:
+            if request_id != YGO3_ENTER:
                 raise ValueError(f"Expected 0x200A, received {request_id!r}")
 
             player_id = fields.get("player_id")
@@ -9679,7 +11348,7 @@ class DuelSession:
                 if request_id == 0x2724:
                     self.heartbeats += 1
                     continue
-                if request_id == YO3_CLIENT_DUEL:
+                if request_id == YGO3_CLIENT_DUEL:
                     await self.handle_client_command(player_id, message, packet)
                     continue
         except (asyncio.TimeoutError, asyncio.IncompleteReadError):
