@@ -1,3 +1,4 @@
+
 <div align="center">
 
 # Yu-Gi-Oh! ONLINE 3 — Private Server
@@ -24,7 +25,7 @@ This project combines two tools:
 
 | Component | Description | Main file(s) |
 |---|---|---|
-| 🖥️ **Experimental Private Server** | A local Python server that reproduces selected parts of the original game's server infrastructure, with EDOPro-powered duel support. | `ygo3_server.py`, `ygo3_gui.py` |
+| 🖥️ **Experimental Private Server** | A local Python server that reproduces selected parts of the original game's server infrastructure, with EDOPro-powered duel support and experimental LLM-powered NPC functionality. | `ygo3_server.py`, `ygo3_gui.py` |
 | 📦 **YPK Archive Extractor** | A graphical tool for extracting `.ypk` archives from the Yu-Gi-Oh! ONLINE series. | `ypk_extractor.py` |
 
 The goal is to investigate the original game's network communication, understand its data formats, access its resources, and support further preservation and community development.
@@ -57,7 +58,7 @@ The goal is to investigate the original game's network communication, understand
 - The private server has progressed beyond initial connection handling and now contains server-side components for **account, player, card, shop, and duel** functionality.
 - Full end-to-end compatibility with the original client has **not** been established.
 - The original milestone was getting the client to connect to a local Python server, pass the initial login flow, and receive test account and player-list data. At that stage, the client reached a **black screen after player selection**.
-- Further duel and game-system development has been added since, but a complete playable offline experience has not been verified.
+- Further duel and game-system development has been added since, including experimental AI-powered NPC functionality, but a complete playable offline experience has not been verified.
 - The YPK extractor supports recognized archive entries, subject to the implemented archive format and compression methods.
 
 ## Game Download
@@ -74,16 +75,26 @@ The original installer is available on the Internet Archive:
 ## Quick Start
 
 1. **Install the dependencies**
+
    ```bash
    py -3.12 -m pip install pycryptodome customtkinter
    ```
+
 2. **Gather the EDOPro components** (`ocgcore.dll`, `cards.cdb`, Lua scripts) from [Project Ignis](https://projectignis.github.io/download.html). Architecture must match your Python (32-bit ↔ 32-bit, 64-bit ↔ 64-bit).
+
 3. **Back up** your original `yo3.ini`, then point it at `127.0.0.1` (see [Local Server Configuration](#local-server-configuration)).
+
 4. **Launch the GUI** and configure paths:
+
    ```bash
    py ygo3_gui.py
    ```
-5. **Start the server**, launch the game client, leave the login fields **blank**, and press **OK**.
+
+5. **Download NPC Card IDs** using the card ID download option in `ygo3_gui.py`. This provides the required card IDs to enable duels against all NPCs.
+
+6. **Optional: Configure LM Studio** if you want AI-powered NPC decision-making and dialogue. Install LM Studio, load a compatible model, start its Local Server, and configure the AI settings in `ygo3_server.py`.
+
+7. **Start the server**, launch the game client, leave the login fields **blank**, and press **OK**.
 
 Just want the archive tool? Run `py ypk_extractor.py` — it needs only the standard library and Tkinter.
 
@@ -96,6 +107,7 @@ Just want the archive tool? Run `py ypk_extractor.py` — it needs only the stan
   - [Protocol Details](#protocol-details)
   - [Test Account & Login](#test-account--login)
   - [Duel System](#duel-system)
+  - [AI & LM Studio Integration](#ai--lm-studio-integration)
   - [Configuration](#configuration)
   - [Server Control GUI](#server-control-gui)
   - [Running the Server](#running-the-server)
@@ -125,7 +137,7 @@ The initial connection and login research established that:
 - [x] The client proceeds to player selection
 - [ ] Full original-client compatibility *(still requires testing and compatibility work)*
 
-Additional server-side functionality (duel-engine integration, game-system components) has since been developed.
+Additional server-side functionality (duel-engine integration, game-system components and AI-powered NPC features) has since been developed.
 
 ## How It Works
 
@@ -202,7 +214,7 @@ The player selection screen also uses placeholder player information.
 
 ## Server Features
 
-Gate, Front, and Duel server communication · HTTP resource serving · test account and profile handling · player-list responses and selection · card database access · deck-related data · BP and card management · persistent server state · duel management · EDOPro OCG core integration.
+Gate, Front, and Duel server communication · HTTP resource serving · test account and profile handling · player-list responses and selection · card database access · deck-related data · BP and card management · persistent server state · duel management · EDOPro OCG core integration · LM Studio LLM integration · AI-powered NPC decision-making and dialogue · NPC banter and duel reactions · NPC Card ID downloading through `ygo3_gui.py`.
 
 Availability and completeness of each feature depend on the current implementation and original client compatibility.
 
@@ -256,6 +268,43 @@ Python and `ocgcore.dll` must use matching architectures.
 3. End the Battle Phase when no legal attack is available.
 
 </details>
+
+## AI & LM Studio Integration
+
+YO3Server includes experimental **Large Language Model (LLM) integration through LM Studio**, providing AI-powered NPC decision-making and dialogue.
+
+The LLM is used for both **making NPC decisions and generating the text NPCs display in-game**.
+
+Unlike traditional NPC systems that rely entirely on predefined dialogue and scripted behaviour, the AI can process available NPC and game context to generate decisions and responses dynamically.
+
+### AI-powered NPC features
+
+- **NPC Decision-Making:** LLM models process available game and NPC context to make decisions during gameplay.
+- **NPC Dialogue:** The AI generates the text NPCs display in-game, including character dialogue, banter and reactions.
+- **Duel Reactions:** NPC text can be generated in response to relevant duel events and interactions.
+- **Context-Aware Responses:** AI-generated responses can take the NPC's situation and available game context into account.
+- **Dynamic Behaviour:** NPC interactions are not entirely dependent on predefined messages or scripted responses.
+
+### How it works
+
+1. `ygo3_server.py` sends relevant NPC and game context to the configured LLM.
+2. LM Studio processes the request using the loaded language model.
+3. The model generates an NPC decision and/or dialogue response.
+4. The server processes the response and passes supported results into the game.
+
+### LM Studio setup
+
+1. Install [LM Studio](https://lmstudio.ai/).
+2. Download and load a compatible language model.
+3. Start the LM Studio **Local Server**.
+4. Configure the AI settings in `ygo3_server.py`, including the model, API key, endpoint and request timeout.
+5. Keep LM Studio running with the selected model loaded while using AI-powered NPC features.
+
+> [!NOTE]
+> LM Studio runs the AI model locally. NPC decision-making and dialogue generation are therefore handled by your own machine rather than requiring a hosted AI service. Performance and response quality depend on the selected model and available hardware.
+
+> [!IMPORTANT]
+> AI-powered NPC functionality is experimental. Model compatibility, response quality, processing time and supported decisions may vary.
 
 ## Configuration
 
@@ -342,8 +391,6 @@ The primary route is `/yo3/` — for example `http://127.0.0.1/yo3/yo3.idx`. The
 | `404` | File not found |
 | `405` | Unsupported request method |
 
----
-
 ## Server Control GUI
 
 The graphical launcher, built with CustomTkinter, is the recommended way to configure and manage the server.
@@ -356,9 +403,26 @@ It has three tabs: **Server Settings**, **BP Manager**, and **Server Logs**.
 
 ### Server Settings
 
-Configure the server script, game directory, OCG core DLL, `cards.cdb`, Lua script directory, persistent data directory, HTTP web directory, Python interpreter, bind address, front server address, and the Gate / Front / Duel / HTTP ports. Settings are stored in `ygo3_launcher_config.json`, making it easy to switch between installations and environments.
+Configure the server script, game directory, OCG core DLL, `cards.cdb`, Lua script directory, persistent data directory, HTTP web directory, Python interpreter, bind address, front server address, and the Gate / Front / Duel / HTTP ports.
 
-The interpreter selector includes a **Find 32-bit** option and a **Python environment check** that verifies the 32-bit setup and tests whether `Crypto.Cipher.Blowfish` imports. A matching 64-bit Python and OCG core also work. The GUI provides **Start Server**, **Stop Server**, and a status display.
+Settings are stored in `ygo3_launcher_config.json`, making it easy to switch between installations and environments.
+
+The interpreter selector includes a **Find 32-bit** option and a **Python environment check** that verifies the 32-bit setup and tests whether `Crypto.Cipher.Blowfish` imports. A matching 64-bit Python and OCG core also work.
+
+The GUI provides **Start Server**, **Stop Server**, and a status display.
+
+### NPC Card ID Downloads
+
+The GUI includes an option to download NPC Card IDs.
+
+These card IDs provide the required card data for NPC duels and allow players to duel against **all NPCs** supported by the server.
+
+To use this functionality:
+
+1. Launch `ygo3_gui.py`.
+2. Open the NPC Card ID download option.
+3. Download the available NPC Card IDs.
+4. Use the downloaded card data when running the server and challenging NPCs.
 
 ### BP Manager
 
@@ -375,7 +439,11 @@ Validation covers positive BP amounts, non-negative user IDs, the maximum 32-bit
 
 ### Server Logs
 
-Captures stdout, stderr, live log output, and process status/exit code, with a button to clear the display. Useful for debugging connections, packet handling, HTTP requests, OCG initialisation, and errors. Logs may include incoming connections, received and decrypted packets, parsed fields, server responses, and exceptions. The original research setup also used `gate_test.log`.
+Captures stdout, stderr, live log output, and process status/exit code, with a button to clear the display.
+
+Useful for debugging connections, packet handling, HTTP requests, OCG initialisation, AI requests and errors.
+
+Logs may include incoming connections, received and decrypted packets, parsed fields, server responses, AI connection activity, and exceptions. The original research setup also used `gate_test.log`.
 
 ---
 
@@ -401,6 +469,7 @@ py ygo3_server.py       # start the server directly
 | **Python** | 3.12 (documented development version); architecture must match `ocgcore.dll` |
 | **Server & GUI** | `pycryptodome`, `customtkinter` |
 | **Duel system** | `ocgcore.dll`, `cards.cdb`, Lua scripts (`constant.lua`, `utility.lua`) |
+| **AI / NPC system** | [LM Studio](https://lmstudio.ai/) and a compatible locally hosted LLM (optional) |
 | **YPK extractor** | Standard library + Tkinter only |
 
 ```bash
@@ -443,7 +512,7 @@ py ypk_extractor.py
 The extractor recognises the signature `YO\x03\x04` and reads: compression method, CRC32, compressed size, uncompressed size, filename length, extra field length, filename, and compressed payload.
 
 | Method | Description | Support |
-|:---:|---|---|
+|:---:|---|:---:|
 | `0` | Stored / uncompressed | ✅ Supported |
 | `8` | Raw DEFLATE | ✅ Supported |
 | Other | Other compression methods | ❌ Not currently supported |
@@ -457,7 +526,9 @@ Extracted data is checked against the recorded size and CRC32 where applicable.
 
 # Part 3 – Preservation & Community Development
 
-Extracted resources may support future research and preservation projects, such as custom clients, rebuilt user interfaces, asset viewers and editors, alternative resource systems, alternative server implementations, and multi-game preservation efforts. Extracting resources alone does **not** create a playable recreation of the game.
+Extracted resources may support future research and preservation projects, such as custom clients, rebuilt user interfaces, asset viewers and editors, alternative resource systems, alternative server implementations, and multi-game preservation efforts.
+
+Extracting resources alone does **not** create a playable recreation of the game.
 
 **Potential areas for contribution** *(not claims of completed features)*:
 
@@ -497,6 +568,8 @@ The server does not currently guarantee complete compatibility with the original
 
 Some profile and player-list values are placeholders, and some protocol fields have been inferred rather than confirmed. Client crashes and unexpected behaviour may occur with unimplemented features.
 
+AI-powered NPC functionality is also experimental. LLM responses and decisions depend on the selected model, available context and local hardware.
+
 ---
 
 # Troubleshooting
@@ -535,16 +608,42 @@ Check that `cards.cdb` exists, the GUI points to it, and it's compatible with th
 </details>
 
 <details>
+<summary><b>NPC Card IDs or NPC duels are not working</b></summary>
+
+Launch `ygo3_gui.py` and use the NPC Card ID download option. Check that the download completes and that the server is using the required card data.
+
+</details>
+
+<details>
+<summary><b>LM Studio / NPC AI not responding</b></summary>
+
+Check that:
+
+- LM Studio is installed and running.
+- A compatible language model is downloaded and loaded.
+- The LM Studio Local Server has been started.
+- The configured endpoint and model settings in `ygo3_server.py` are correct.
+- The selected model has enough available memory to run.
+
+If NPC dialogue or decision-making fails, check the server logs for connection errors, request timeouts or invalid AI responses.
+
+</details>
+
+<details>
 <summary><b>HTTP resource errors</b></summary>
 
-Check that the game directory and web root are correct, the requested resource exists, the HTTP port is available, and the route is implemented. Remember that `/ygoda/patch/` and `/app/` are not yet complete replacements for the original services.
+Check that the game directory and web root are correct, the requested resource exists, the HTTP port is available, and the route is implemented.
+
+Remember that `/ygoda/patch/` and `/app/` are not yet complete replacements for the original services.
 
 </details>
 
 <details>
 <summary><b>The original client gets stuck (black screen / stall)</b></summary>
 
-The server is experimental. A stalled client may indicate an unsupported packet, an incomplete server response, missing game resources, an incorrect client configuration, an unimplemented service, or an unexpected client-side dependency. Check the server logs for connection activity, packet handling, and errors.
+The server is experimental. A stalled client may indicate an unsupported packet, an incomplete server response, missing game resources, an incorrect client configuration, an unimplemented service, or an unexpected client-side dependency.
+
+Check the server logs for connection activity, packet handling, and errors.
 
 </details>
 
@@ -552,7 +651,9 @@ The server is experimental. A stalled client may indicate an unsupported packet,
 
 # Original Game Files
 
-This project is for preservation and research. The YPK extractor reads archives and writes extracted resources to a separate output directory — it does not intentionally modify the originals. Always back up original game files and configuration before experimenting.
+This project is for preservation and research. The YPK extractor reads archives and writes extracted resources to a separate output directory — it does not intentionally modify the originals.
+
+Always back up original game files and configuration before experimenting.
 
 # Disclaimer
 
