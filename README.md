@@ -42,6 +42,12 @@ The goal is to investigate the original game's network communication, understand
 |:---:|:---:|
 | <img src="https://raw.githubusercontent.com/iteratequickly/ygo3-research/refs/heads/main/assets/image4.png" alt="Player Selection"> | <img src="https://raw.githubusercontent.com/iteratequickly/ygo3-research/refs/heads/main/assets/image7.png" alt="Client State"> |
 
+### LLM AI Log
+
+<div align="center">
+<img src="https://raw.githubusercontent.com/iteratequickly/ygo3-research/refs/heads/main/assets/image10.png" alt="AI Log" width="800">
+</div>
+
 ### YPK Extractor
 
 <div align="center">
