@@ -297,7 +297,7 @@ Unlike traditional NPC systems that rely entirely on predefined dialogue and scr
 1. Install [LM Studio](https://lmstudio.ai/).
 2. Download and load a compatible language model.
 3. Start the LM Studio **Local Server**.
-4. Configure the AI settings in `ygo3_server.py`, including the model, API key, endpoint and request timeout.
+4. Configure the AI settings in `ygo3_gui.py`, including the model, endpoint and request timeout.
 5. Keep LM Studio running with the selected model loaded while using AI-powered NPC features.
 
 > [!NOTE]
