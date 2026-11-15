@@ -1,13 +1,9 @@
+
 # YGO3 – References
 
-This document lists external references used for research into
-**Yu-Gi-Oh! Online 3: Duel Accelerator**, including its assets, file formats,
-community documentation, and server cryptography.
+This document lists external references used for research into **Yu-Gi-Oh! ONLINE 3: Duel Accelerator**, including its assets, file formats, card data, community documentation, and server cryptography.
 
-These resources are provided for historical and technical research. They are
-not necessarily official documentation, and information obtained from
-community posts should be independently verified against the game files and
-server implementation.
+These resources are provided for historical and technical research. They are not necessarily official documentation, and information obtained from community posts should be independently verified against the game files and server implementation.
 
 ---
 
@@ -29,7 +25,24 @@ https://archive.vg-resource.com/post-658972.html
 
 ---
 
-## 2. Game history and community information
+## 2. Card data and database research
+
+### GitHub – Yu-Gi-Oh! Card List Scraper
+
+**Link:**  
+https://github.com/Pietracoops/yugioh_cardlist_scraper
+
+**Subject:** Yu-Gi-Oh! card list scraping and data collection.
+
+**Relevance:**
+- Reference for collecting and organizing Yu-Gi-Oh! card information.
+- Useful for researching card names, identifiers, and card-list data.
+- Potential reference when investigating card database completeness and data consistency.
+- Relevant to card data research for the YGO3 private server.
+
+---
+
+## 3. Game history and community information
 
 ### GameFAQs – Yu-Gi-Oh! Online 3: Duel Accelerator Message Board
 
@@ -48,7 +61,7 @@ https://gamefaqs.gamespot.com/boards/981343-yu-gi-oh-online-3-duel-accelerator
 
 ---
 
-## 3. Game file research and reverse engineering
+## 4. Game file research and reverse engineering
 
 ### ZenHAX – Yu-Gi-Oh! Online 3 discussion
 
@@ -64,7 +77,7 @@ https://zenhax.com/viewtopic.php@t=8318.html
 
 ---
 
-## 4. Server cryptography
+## 5. Server cryptography
 
 ### Elitepvpers – [Release] YO Gi Oh Online 3 Cryptography
 
@@ -76,42 +89,36 @@ https://www.elitepvpers.com/forum/private-server/2655667-release-yo-gi-oh-online
 **Relevance:**
 - Historical research relating to YGO3 cryptography.
 - A potential reference for understanding client/server communication.
-- Useful when investigating packet encryption, connection handling, and
-  protocol implementation.
+- Useful when investigating packet encryption, connection handling, and protocol implementation.
 
 ---
 
-## 5. Research and verification guidelines
+## 6. Research and verification guidelines
 
 When using these references for the YGO3 project:
 
-1. Prefer direct inspection of the original game files when determining file
-   formats, packet structures, and data layouts.
+1. Prefer direct inspection of the original game files when determining file formats, packet structures, and data layouts.
 2. Treat forum posts as research leads rather than guaranteed technical facts.
-3. Verify packet IDs and field layouts against the Python server implementation
-   and captured client/server traffic.
+3. Verify packet IDs and field layouts against the Python server implementation and captured client/server traffic.
 4. Keep asset-format research separate from network-protocol research.
-5. Document any inferred behavior and distinguish it from behavior confirmed
-   through testing.
-6. Record the original source URL when incorporating findings into project
-   documentation.
-7. Do not assume that a packet ID, encryption method, or file-format detail
-   applies to every version of the game without verification.
+5. Document any inferred behavior and distinguish it from behavior confirmed through testing.
+6. Record the original source URL when incorporating findings into project documentation.
+7. Do not assume that a packet ID, encryption method, or file-format detail applies to every version of the game without verification.
 
 ---
 
-## 6. Source summary
+## 7. Source summary
 
 | Source | Main research area | Source type |
 |---|---|---|
 | VG Resource | Character models and asset conversion | Community technical discussion |
+| GitHub – Yu-Gi-Oh! Card List Scraper | Card data collection and card-list research | Open-source project |
 | GameFAQs | Game history, NPCs, features and player reports | Community message board |
 | ZenHAX | Game file research and reverse engineering | Technical discussion forum |
 | Elitepvpers | YGO3 cryptography | Private-server research forum |
 
 ---
 
-*Last reviewed: 2026-11-11*
+*Last reviewed: 2026-11-15*
 
-*This document is an index of external research references, not a claim of
-ownership or authorship of the linked material.*
+*This document is an index of external research references, not a claim of ownership or authorship of the linked material.*
