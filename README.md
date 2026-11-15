@@ -10,7 +10,7 @@
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![Status](https://img.shields.io/badge/Status-Work%20in%20Progress-orange.svg)](#project-status)
 
-<img src="https://raw.githubusercontent.com/iteratequickly/ygo3-research/refs/heads/main/assets/image8.png" alt="Yu-Gi-Oh! ONLINE 3" width="720">
+<img src="https://raw.githubusercontent.com/iteratequickly/ygo3-research/refs/heads/main/assets/image9.png" alt="Yu-Gi-Oh! ONLINE 3" width="720">
 
 [Status](#project-status) · [Quick Start](#quick-start) · [Private Server](#part-1--experimental-private-server) · [YPK Extractor](#part-2--ypk-archive-extractor) · [Known Issues](#known-bugs) · [Troubleshooting](#troubleshooting)
 
