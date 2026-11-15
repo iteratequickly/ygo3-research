@@ -13,5 +13,10 @@
   "front_port": "1213",
   "duel_port": "1214",
   "http_port": "80",
-  "user_id": "1001"
+  "card_ids_output": "",
+  "lm_studio_url": "http://localhost:1234/v1",
+  "npc_ai_timeout": "30",
+  "lm_studio_model": "",
+  "user_id": "1001",
+  "npc_ai_enabled": "false"
 }
