@@ -271,7 +271,7 @@ Python and `ocgcore.dll` must use matching architectures.
 
 ## AI & LM Studio Integration
 
-ygo3_server.py includes experimental **Large Language Model (LLM) integration through LM Studio**, providing AI-powered NPC decision-making and dialogue.
+`ygo3_server.py` includes experimental **Large Language Model (LLM) integration through LM Studio**, providing AI-powered NPC decision-making and dialogue.
 
 The LLM is used for both **making NPC decisions and generating the text NPCs display in-game**.
 
