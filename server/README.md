@@ -1,9 +1,8 @@
-
 # YGO3 Private Server — Features
 
 ## Overview
 
-A private server implementation for Yu-Gi-Oh! Online 3 (YGO3), providing the game systems and backend functionality needed to support the client.
+A private server implementation for Yu-Gi-Oh! Online 3: Duel Accelerator (YGO3), providing the game systems and backend functionality needed to support the client.
 
 This README documents the server's features and internal systems only.
 
