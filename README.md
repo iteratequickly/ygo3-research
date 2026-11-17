@@ -42,6 +42,11 @@ The goal is to investigate the original game's network communication, understand
 |:---:|:---:|
 | <img src="https://raw.githubusercontent.com/iteratequickly/ygo3-research/refs/heads/main/assets/image4.png" alt="Player Selection"> | <img src="https://raw.githubusercontent.com/iteratequickly/ygo3-research/refs/heads/main/assets/image7.png" alt="Client State"> |
 
+| Duel Draw | Duel Surrender |
+|:---:|:---:|
+| <img src="https://raw.githubusercontent.com/iteratequickly/ygo3-research/refs/heads/main/assets/image11.png" alt="Duel Draw"> | <img src="https://raw.githubusercontent.com/iteratequickly/ygo3-research/refs/heads/main/assets/image12.png" alt="Duel Surrender"> |
+
+
 ### LLM AI Log
 
 <div align="center">
