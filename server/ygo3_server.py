@@ -51,7 +51,7 @@ from Crypto.Cipher import Blowfish
 from typing import Optional
 
 # Logger for everything in this file.
-log = logging.getLogger("yo3.duel_engine")
+log = logging.getLogger("ygo3.duel_engine")
 
 
 # --- Paths, launcher configuration and NPC AI -------------------------------
@@ -1050,7 +1050,7 @@ class OCG_QueryInfo(ctypes.Structure):
 
 # Declares argument/return types of the engine's card-query functions.
 def bind_queries(dll) -> None:
-    if getattr(dll, "_yo3_query_bound", False):
+    if getattr(dll, "_ygo3_query_bound", False):
         return
     for name in ("OCG_DuelQuery", "OCG_DuelQueryLocation"):
         fn = getattr(dll, name)
@@ -1062,7 +1062,7 @@ def bind_queries(dll) -> None:
         fn.restype = ctypes.c_void_p
     dll.OCG_DuelQueryCount.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint32]
     dll.OCG_DuelQueryCount.restype = ctypes.c_uint32
-    dll._yo3_query_bound = True
+    dll._ygo3_query_bound = True
 
 
 # Decodes the byte blob the engine returns for a card query (flag-driven fields).
@@ -1333,7 +1333,8 @@ AUX_SUCCESS_REPLY = {
 
 DUEL_POINTS = 10000
 DUEL_TURN_TIME = 180
-DUEL_TOTAL_TIME = 600
+# The whole match's time in seconds (15 minutes); when it runs out the duel ends as a draw.
+DUEL_TOTAL_TIME = int(os.getenv("YGO3_DUEL_TIME", "900") or 900)
 # Seconds the Rock, Paper, Scissors screen shows (engine clock slot 4). Nothing in the client acts when it
 # reaches 0, so it is only a display.
 Roshambo_TIME = int(os.getenv("YGO3_Roshambo_TIME", "30") or 30)
@@ -1341,7 +1342,7 @@ PREMIUM = int(os.getenv("YGO3_PREMIUM", "1") or 1)
 # Duelist Premium (the eagle at the top left). The client parses this text ("%4d-%2d-%2d %2d:%2d:%2d",
 # JST) with mktime/localtime (0x485B50/0x485C00); a missing or unparsable value makes localtime return
 # NULL and the client crashes (0x485CA1). 2037-12-31 23:59:59 is the last day a 32-bit time_t holds and
-# is the value the working revival server uses (eagle shows "Valid until 2037/12/31").
+
 PREMIUM_EXPIRE = os.getenv("YGO3_PREMIUM_EXPIRE", "2037-12-31 23:59:59")
 
 # item_type of the entries on the Special Packs shelf (0x1C2E). The docs say item_type < 3 go on the
@@ -1406,7 +1407,7 @@ ROUND_DELAY = float(os.getenv("YGO3_ROUND_DELAY", "20"))  # seconds between roun
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
-STATE_FILE = DATA_DIR / "yo3_state.pkl"
+STATE_FILE = DATA_DIR / "ygo3_state.pkl"
 CONFIG_FILE = DATA_DIR / "ygo3_launcher_config.json"
 
 
@@ -1588,9 +1589,9 @@ class CardDatabase:
         )
         self.connection.row_factory = sqlite3.Row
         self.lock = threading.RLock()
-        self._yo3_cid_passcodes = {}
+        self._ygo3_cid_passcodes = {}
 
-        # The Konami id -> passcode file (the revival project's engine/card-ids.json, YGOPRODeck's cardinfo
+        # The Konami id -> passcode file (card-ids.json, YGOPRODeck's cardinfo
         # format). Without it cards are matched by name and stats, which fails on the client's abbreviated
         # names ("Red-Eyes B. Chick"). The first existing file of these is used.
         here = Path(__file__).resolve().parent
@@ -1618,10 +1619,10 @@ class CardDatabase:
                     for misc in entry.get("misc_info", []) or []:
                         cid = int(misc.get("konami_id", 0) or 0)
                         if cid and passcode:
-                            self._yo3_cid_passcodes.setdefault(cid, passcode)
+                            self._ygo3_cid_passcodes.setdefault(cid, passcode)
                 log.info(
                     "Loaded %d authoritative YGO3 CID/passcode mappings from %s",
-                    len(self._yo3_cid_passcodes),
+                    len(self._ygo3_cid_passcodes),
                     mapping_file,
                 )
             except Exception:
@@ -1678,15 +1679,15 @@ class CardDatabase:
         return re.sub(r"[^a-z0-9]", "", str(name or "").casefold())
 
     # Finds rows whose name matches a YGO3 name shortened with '...'.
-    def _abbreviated_name_rows(self, yo3_name: str):
-        tokens = yo3_name.split()
+    def _abbreviated_name_rows(self, ygo3_name: str):
+        tokens = ygo3_name.split()
         if not any(token.endswith(".") for token in tokens):
             return []
 
-        def token_matches(yo3_token, cdb_token):
-            wanted = self._normalise_card_name(yo3_token)
+        def token_matches(ygo3_token, cdb_token):
+            wanted = self._normalise_card_name(ygo3_token)
             have = self._normalise_card_name(cdb_token)
-            if yo3_token.endswith("."):
+            if ygo3_token.endswith("."):
                 return bool(wanted) and have.startswith(wanted)
             return wanted == have
 
@@ -1707,9 +1708,9 @@ class CardDatabase:
 
     # Maps a YGO3 card (by name/cid) to the OCG passcode, trying exact, normalised and abbreviated
     # names.
-    def resolve_yo3_card(self, card) -> int:
+    def resolve_ygo3_card(self, card) -> int:
         cid = int(getattr(card, "cid", 0) or 0)
-        mapped = self._yo3_cid_passcodes.get(cid)
+        mapped = self._ygo3_cid_passcodes.get(cid)
         if mapped:
             if self.get_card(mapped) is not None:
                 return mapped
@@ -2210,14 +2211,14 @@ class DuelDeckError(ValueError):
 # Owns the live duels: converts YGO3 decks to passcodes, creates duels and tracks them by id.
 class DuelManager:
     # Binds the engine and the YGO3 card table.
-    def __init__(self, engine: DuelEngine, yo3_cards: dict):
+    def __init__(self, engine: DuelEngine, ygo3_cards: dict):
         if not isinstance(engine, DuelEngine):
             raise TypeError("engine must be a DuelEngine")
-        if not isinstance(yo3_cards, dict):
-            raise TypeError("yo3_cards must be a dictionary")
+        if not isinstance(ygo3_cards, dict):
+            raise TypeError("ygo3_cards must be a dictionary")
 
         self.engine = engine
-        self.yo3_cards = yo3_cards
+        self.ygo3_cards = ygo3_cards
         self._passcode_by_row = {}
         self.duels = {}
         self.lock = threading.RLock()
@@ -2236,14 +2237,14 @@ class DuelManager:
         rows = struct.unpack(f">{len(raw) // 2}H", raw)
         result = []
         for row in rows:
-            card = self.yo3_cards.get(row)
+            card = self.ygo3_cards.get(row)
             if card is None:
                 raise DuelDeckError(f"YGO3 card row {row} does not exist")
 
             card_id = self._passcode_by_row.get(row)
             if card_id is None:
                 try:
-                    card_id = self.engine.database.resolve_yo3_card(card)
+                    card_id = self.engine.database.resolve_ygo3_card(card)
                 except DuelDeckError as exc:
                     if not lenient:
                         raise
@@ -2856,6 +2857,56 @@ def open_shop_pack(pack, rng_seed=0):
 
 
 # A pack as a shop shelf entry (0x1C22).
+# Blister's "Trade Card": the client's exchange pools are its pack files 264-268 (pack_type 4), one per run of the
+# first 48 booster packs; a card of a pool costs EXCHANGE_COST of the player's own cards. Shop rental: the client
+# lists the cards of its pack file 10000 to pick from; the server sets the offer. Both costs are the project's choices (the original's are unknown).
+EXCHANGE_POOLS = range(264, 269)
+EXCHANGE_COST = 10
+RENTAL_POOL = 10000
+RENTAL_CARDS = 5
+RENTAL_BP = 100
+RENTAL_DAYS = 7
+
+
+def pool_rows(pack):
+    """Every card row of a pack file, whatever its rarity tiers."""
+    return [row for tier in pack.tiers for row in tier]
+
+
+def exchange_packs():
+    """The exchange pools this game data has (pack files 264-268 with cards)."""
+    return [
+        p
+        for p in (getattr(GAME, "packs", []) or [])
+        if int(p.id) in EXCHANGE_POOLS and pool_rows(p)
+    ]
+
+
+def rental_pool():
+    """The rows of the shop rental pool (pack file 10000); empty when this game data has none."""
+    pack = next(
+        (p for p in (getattr(GAME, "packs", []) or []) if int(p.id) == RENTAL_POOL),
+        None,
+    )
+    return set(pool_rows(pack)) if pack is not None else set()
+
+
+# A pool on Blister's Trade Card list (a 0x1C26 item): the client expands item_id, its own pack file, into one card
+# per row, each costing item_cost of the player's cards; item_trade 0 leaves the received card tradable.
+def exchange_item(pack):
+    return MessageRecord(
+        fields={
+            "item_type": 0,
+            "item_id": int(pack.id),
+            "item_cost": EXCHANGE_COST,
+            "item_trade": 0,
+            "sale_id": int(pack.id),
+            "modified": pack.modified,
+            "rel_time": pack.released,
+        }
+    )
+
+
 def shelf_item(pack, item_type=0):
     return MessageRecord(
         fields={
@@ -3693,7 +3744,10 @@ def tick_rentals(now=None):
     for rental in ended:
         rental["confirm_from"] = rental["confirm_to"] = 1
     STATE.save()
-    for player_id in {r["from_id"] for r in ended} | {r["to_id"] for r in ended}:
+    # Player 0 is the shop (a rental from the shop has no lender to tell).
+    for player_id in ({r["from_id"] for r in ended} | {r["to_id"] for r in ended}) - {
+        0
+    }:
         push_rentals(player_id)
     return len(ended)
 
@@ -3824,7 +3878,7 @@ def uev_new(host_id, fields):
         "duel_surrender": number("duel_surrender", 1, 0, 1),
         "duel_watch": number("duel_watch", 1, 0, 1),
         "duel_time_turn": number("duel_time_turn", 180, 10, 3600),
-        "duel_time_total": number("duel_time_total", 600, 10, 7200),
+        "duel_time_total": number("duel_time_total", DUEL_TOTAL_TIME, 10, 7200),
         "duel_lp_start": number("duel_lp_start", 8000, 100, 99999),
         "regulation_id": number("regulation_id", REGULATION_ID, 0, 0xFFFF)
         or REGULATION_ID,
@@ -3987,7 +4041,7 @@ def uev_begin_round(event):
     run["timer"], run["deadline"], run["status"] = None, 0.0, 6
     run["duels"] = {}
     for index in range(0, len(alive) - 1, 2):
-        duel_id = next_yo3_id("duel")
+        duel_id = next_ygo3_id("duel")
         run["duels"][duel_id] = {
             "players": (alive[index], alive[index + 1]),
             "winner": None,
@@ -4672,11 +4726,13 @@ class GameData:
                 if str(p).lower().endswith((".y3a", ".y3p", ".y3d"))
             ]
 
+        unreadable = []
         for path in pack_paths:
             try:
                 raw_data = ypk.read_required(path)
                 fields = decode_data_file(raw_data)
-            except Exception:
+            except Exception as exc:
+                unreadable.append((str(path), repr(exc)[:80]))
                 continue
 
             if not fields:
@@ -4704,6 +4760,17 @@ class GameData:
                 )
             )
 
+        if unreadable:
+            log.warning(
+                "[GameData] %d pack/deck files could not be decoded; first: %s",
+                len(unreadable),
+                unreadable[:3],
+            )
+        log.info(
+            "[GameData] Pack files by id range: %s | files named 10000: %s",
+            sorted({int(p.id) // 1000 * 1000 for p in data.packs}),
+            [str(e) for e in ypk.entries if "10000" in str(e)][:4],
+        )
         log.info(
             "[GameData] pack_type histogram: %s",
             dict(Counter(p.pack_type for p in data.packs)),
@@ -4758,8 +4825,7 @@ class GameData:
         )
         if deck is not None or exact:
             return deck
-        # This game data has no deck for the NPC (140 preset decks here, 163 in the version the revival
-        # project was built on). The same level of the nearest character that has one stands in, so the
+        # This game data has no deck for the NPC (140 preset decks here). The same level of the nearest character that has one stands in, so the
         # NPC can still be dueled.
         first = 120
         level, group = (npc_id - first) % 3, (npc_id - first) // 3
@@ -4794,7 +4860,7 @@ YGO3_DUEL_COUNTER = int(time.time() * 1000) & 0x7FFFFFFF
 
 
 # Next join id or duel id (31-bit counters).
-def next_yo3_id(which="join"):
+def next_ygo3_id(which="join"):
     global YGO3_JOIN_COUNTER, YGO3_DUEL_COUNTER
     if which == "duel":
         YGO3_DUEL_COUNTER = (YGO3_DUEL_COUNTER + 1) & 0x7FFFFFFF
@@ -4975,6 +5041,13 @@ def init_game_data():
     log.info("[GameData] Card sleeves: %d", len(GAME.sleeve_items))
     log.info("[GameData] Duel disks: %d", len(GAME.duel_disk_items))
     log.info("[GameData] Avatar items: %d", len(GAME.avatar_items))
+    log.info(
+        "[GameData] Trade Card pools: %d of %d | shop rental pool (pack %d): %d cards",
+        len(exchange_packs()),
+        len(EXCHANGE_POOLS),
+        RENTAL_POOL,
+        len(rental_pool()),
+    )
     log.info("[GameData] Booster packs: %d", len(GAME.packs))
     log.info("[GameData] Structure decks: %d", len(GAME.structure_decks))
 
@@ -5136,7 +5209,7 @@ TYPE_BINARY = 8
 # Encodes one field value: int -> uint32, str -> text, bytes -> binary.
 class ExactText(str):
     """A text value sent with exactly its own bytes. Ordinary text carries a terminating NUL in its length
-    (20 bytes for a 19-character date); the revival server sends the date without it, and the client's
+    (20 bytes for a 19-character date); the server sends the date without it, and the client's
     parse of premium_expire (0x485B50) is the one place where that may matter."""
 
 
@@ -5420,7 +5493,13 @@ class ClientSession:
 
     # 0x1C22: the booster-pack shelf.
     async def send_pack_shelf(self):
-        packs = getattr(GAME, "packs", []) or []
+        # Booster packs only: pack files 264-268 are Blister's exchange pools and 10000 the rental pool, which
+        # have no name or art of their own and are served by their own requests.
+        packs = [
+            p
+            for p in (getattr(GAME, "packs", []) or [])
+            if int(p.id) not in EXCHANGE_POOLS and int(p.id) != RENTAL_POOL
+        ]
 
         # The archive contains several pack_type values across releases.
         # Send the complete loaded catalogue so special packs are not silently
@@ -5512,38 +5591,11 @@ class ClientSession:
         )
 
     # Structure deck shelf.
-    # 0x1B6D answers with the Special Packs shelf (event packs, item_type 10). UNVERIFIED: which
-    # pack_type values mean "special" is a guess (see SPECIAL_PACK_TYPES); the shape of these items
-    # is untested against the real client.
+    # 0x1B6D: the Special Packs shelf, kept empty (event prizes the original server handed out as presents); an
+    # empty list leaves Purchase Special Packs disabled. The five type-4 packs once tried here are Blister's exchange
+    # pools (0x1B6F).
     async def send_structure_deck_shelf(self):
-        special = [
-            p
-            for p in (getattr(GAME, "packs", []) or [])
-            if int(p.pack_type) in SPECIAL_PACK_TYPES
-        ]
-
-        log.info("[Shop] Special packs available: %d", len(special))
-        for p in special:
-            log.info(
-                "[Shop]   special pack id=%s type=%s image=%s released=%s modified=%s name_id=%s",
-                p.id,
-                p.pack_type,
-                p.image,
-                p.released,
-                p.modified,
-                p.name_id,
-            )
-
-        items = []
-        for n, pack in enumerate(special):
-            rec = shelf_item(pack, SPECIAL_ITEM_TYPE)
-            # Items above type 2 are kept only when item_param is not an owned bit (pbin bits, ids up to
-            # 4095). Without it the param reads 0, the default avatar part every player owns, and the
-            # client drops the pack. 4095 downwards is past the catalogue's last id, so never owned.
-            rec.fields["item_param"] = 4095 - n
-            items.append(rec)
-
-        await self.send_message(0x1C2E, items=items)
+        await self.send_message(0x1C2E, items=[])
 
     # Dispatches one front request by id; the numbers are the client's request ids (see
     # protocol.md).
@@ -5821,9 +5873,16 @@ class ClientSession:
             await self.send_structure_deck_shelf()
             return
 
+        # 0x1B6F Blister's Trade Card list
         if request_id == 0x1B6F:
+            pools = exchange_packs()
+            log.info("[Shop] Trade Card pools available: %d", len(pools))
+            await self.send_message(0x1C26, items=[exchange_item(p) for p in pools])
+            return
 
-            await self.send_message(0x1C26, items=[])
+        # 0x1B6A a card exchange
+        if request_id == 0x1B6A:
+            await self.shop_exchange(fields)
             return
 
         # 0x1B68 buy an item
@@ -5892,12 +5951,23 @@ class ClientSession:
             await self.event_lobby_query(request_id, fields)
             return
 
-        # 0x2C40 shop rental summary (none)
+        # 0x2C40 the shop's rental offer: how many cards, for how many BP, for how many days (all 0, an offer
+        # nobody can confirm, without the client's rental pool)
         if request_id == 0x2C40:
+            # The offer always goes out, so the Rent option shows; the client lists its own pack file 10000.
             await self.send_message(
                 0x2D75,
-                {"rental_cardnum": 0, "rental_point": 0, "rental_term": 0},
+                {
+                    "rental_cardnum": RENTAL_CARDS,
+                    "rental_point": RENTAL_BP,
+                    "rental_term": RENTAL_DAYS,
+                },
             )
+            return
+
+        # 0x2C41 a rental from the shop
+        if request_id == 0x2C41:
+            await self.shop_rent(fields)
             return
 
         # 0x177A official event list
@@ -5943,7 +6013,7 @@ class ClientSession:
         # 0x1784 duel/event entry: hands out a join id
         if request_id == 0x1784:
             self.npc_event_id = fields.get("event_id")
-            self.npc_join_id = next_yo3_id("join")
+            self.npc_join_id = next_ygo3_id("join")
             self.npc_duel_id = None
             self.npc_id = None
             self.npc_native_duel_id = None
@@ -5983,7 +6053,7 @@ class ClientSession:
                 return
 
             self.npc_id = npc_id
-            self.npc_duel_id = next_yo3_id("duel")
+            self.npc_duel_id = next_ygo3_id("duel")
 
             await self.send_message(
                 0x17AD,
@@ -6930,7 +7000,7 @@ class ClientSession:
             index = (first_id - 120) // 3
             npc_type = 0 if index < 9 else 1 if index < 17 else 2
             for level in range(3):
-                # Like the revival server, list only NPCs that have a preset deck: the others cannot be
+                # List only NPCs that have a preset deck: the others cannot be
                 # played (the duel fails with "No preset deck found").
                 if GAME.decks and GAME.find_npc_deck(first_id + level) is None:
                     continue
@@ -7828,6 +7898,127 @@ class ClientSession:
         )
         await self.send_message(0x1C24, {"dpoint": self.account.duel_points})
 
+    async def shop_exchange(self, fields):
+        """0x1B6A {sale_id (the pool), item_id (the card picked), kaban (the cards given, big-endian u16 rows)} ->
+        0x1C28 (no fields; the client then asks for presents) or 0x1C29: the card must be in the pool and the
+        cards given exactly its cost, all the player's own (not lent out; borrowed cards are not theirs to give).
+        The card arrives as a present."""
+        player = self.player()
+        pool = next(
+            (p for p in exchange_packs() if int(p.id) == as_int(fields.get("sale_id"))),
+            None,
+        )
+        card = as_int(fields.get("item_id"))
+        kaban = bytes(fields.get("kaban") or b"")
+
+        async def refuse(why):
+            log.warning("[Shop] Card exchange refused: %s", why)
+            await self.send_message(0x1C29)
+
+        if player is None or pool is None:
+            await refuse("no such pool")
+            return
+        if card not in pool_rows(pool):
+            await refuse(f"card {card} is not in pool {pool.id}")
+            return
+        given = rows_of(kaban)
+        if len(kaban) % 2 or len(given) != EXCHANGE_COST:
+            await refuse(f"{len(given)} cards given, {EXCHANGE_COST} wanted")
+            return
+        me = self.selected_player
+        if Counter(given) - tradable_counts(me):
+            await refuse("the cards given are not all the player's own")
+            return
+        gave, cards = player.setdefault("given", {}), player.setdefault("cards", {})
+        for row, count in Counter(given).items():
+            gave[row] = gave.get(row, 0) + count
+        cards[card] = cards.get(card, 0) + 1
+        # The present names the first booster pack that holds the card (its pack file labels the card).
+        pack_id = next(
+            (
+                int(p.id)
+                for p in (getattr(GAME, "packs", []) or [])
+                if int(p.id) not in EXCHANGE_POOLS and card in pool_rows(p)
+            ),
+            int(pool.id),
+        )
+        player.setdefault("presents", []).append(
+            new_present(0, pack_id=pack_id, item=pack_rows([card]))
+        )
+        STATE.save()
+        log.info("[Shop] Player %s traded %d cards for card %s", me, len(given), card)
+        await self.send_message(0x1C28)
+
+    async def shop_rent(self, fields):
+        """0x2C41 {main_list (big-endian u16 rows)} -> 0x2D77 {dpoint} (the client sets its BP from it) or 0x2D78:
+        exactly the offer's number of cards, all from the rental pool, and the BP to pay. It replaces the player's
+        rental from the shop under way. The client then asks for the rental records itself (0x2C34), from which it
+        adds the cards to its collection."""
+        player = self.player()
+        pool = rental_pool()
+        raw = bytes(fields.get("main_list") or b"")
+        cards = rows_of(raw)
+
+        async def refuse(why):
+            log.warning("[Shop] Rental refused: %s", why)
+            await self.send_message(0x2D78)
+
+        if player is None:
+            await refuse("no player")
+            return
+        # With the pool (pack file 10000) read, the cards must be in it; without it (this game data's pack
+        # file could not be read) any real card is accepted.
+        allowed = pool or set(GAME.cards)
+        if (
+            len(raw) % 2
+            or len(cards) != RENTAL_CARDS
+            or not all(c in allowed for c in cards)
+        ):
+            await refuse(f"{len(cards)} cards, not {RENTAL_CARDS} from the pool")
+            return
+        if self.account.duel_points < RENTAL_BP:
+            await refuse("not enough BP")
+            return
+        self.account.duel_points -= RENTAL_BP
+        me, now = self.selected_player, int(time.time())
+        for (
+            old
+        ) in STATE.rentals:  # "current borrowed cards will be returned automatically"
+            if old["from_id"] == 0 and old["to_id"] == me and rental_active(old):
+                old["confirm_from"] = old["confirm_to"] = 1
+        end_ts = now + RENTAL_DAYS * 86400
+        STATE.rentals.append(
+            {
+                "rental_id": STATE.next_rental_id,
+                "from_id": 0,
+                "from_name": "",
+                "from_type": 1,
+                "to_id": me,
+                "to_name": player["pname"],
+                "end_ts": end_ts,
+                "rent_end": datetime.fromtimestamp(end_ts, JST).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+                "deck_type": 0,
+                "confirm_from": 0,
+                "confirm_to": 0,
+                "main": struct.pack(f">{len(cards)}H", *cards),
+                "extra": b"",
+                "side": b"",
+            }
+        )
+        STATE.next_rental_id += 1
+        STATE.save()
+        log.info(
+            "[Shop] Player %s rented %d cards for %d BP (%d days)",
+            me,
+            len(cards),
+            RENTAL_BP,
+            RENTAL_DAYS,
+        )
+        await self.send_message(0x2D77, {"dpoint": self.account.duel_points})
+        push_rentals(me)  # the rental record list shows the new rental at once
+
     async def next_present(self):
         """0x2775 (bare) -> 0x2777 with the next present, or 0x2778 for none."""
         player = self.player()
@@ -8319,6 +8510,43 @@ LM_DUEL_RULES = (
 # The NPC says in the duel chat which card it plays and why, from the LM Studio decision.
 ANNOUNCE_ENABLED = os.getenv("YGO3_NPC_ANNOUNCE", "1") not in ("0", "false", "no")
 
+# Summon animations plays them (Konami's logs): a Tribute Summon shows each tribute
+# leaving, a Fusion Summon the full-screen vortex with its materials, a Synchro Summon the Tuner's rings, plus
+# the avatars' summon, draw, activation and turn-end lines. YGO3_SUMMON_ANIMATIONS=0 turns all of it off.
+SUMMON_ANIMATIONS = os.getenv("YGO3_SUMMON_ANIMATIONS", "1") not in ("0", "false", "no")
+REASON_RELEASE = 0x2
+REASON_MATERIAL = 0x8
+REASON_SUMMON = 0x10
+REASON_SPSUMMON = 0x800
+REASON_FUSION = 0x40000
+REASON_SYNCHRO = 0x80000
+REASON_RITUAL = 0x100000
+REASON_XYZ = 0x200000
+(
+    SUMMON_NORMAL,
+    SUMMON_TRIBUTE,
+    SUMMON_FLIP,
+    SUMMON_SPECIAL,
+    SUMMON_EXTRA,
+    SUMMON_SYNCHRO,
+) = (0, 1, 4, 5, 6, 8)
+CMD_TRIBUTE_SET, CMD_TRIBUTE_RUN = 0x2A, 0x2C
+CMD_MATERIAL_SET, CMD_MATERIAL_RUN = 0x2D, 0x2F
+CMD_TUNING_SET, CMD_TUNING_RUN = 0x30, 0x32
+CMD_RUN_FUSION = 0x3A
+CMD_SPEAK_DRAW, CMD_SPEAK_SUMMON, CMD_SPEAK_ACTIVATE, CMD_SPEAK_TURN_END = (
+    0x43,
+    0x44,
+    0x47,
+    0x4C,
+)
+CMD_MATERIAL_LIST, CMD_MATERIAL_LIST_MORE = 1015, 1016
+# The duel field's background follows the Field Spell: FieldChange (7) with its Konami id while one is face up in
+# the Field zone, 0 when it leaves (DuelScene 0x50CD60). YGO3_FIELD_BACKGROUND=0 turns it off.
+FIELD_BACKGROUND = os.getenv("YGO3_FIELD_BACKGROUND", "1") not in ("0", "false", "no")
+CMD_FIELD_CHANGE = 7
+FIELD_SPELL_ZONE = 10
+
 
 class DuelSession:
     # Binds the stream and the per-duel mirror of the board.
@@ -8344,6 +8572,10 @@ class DuelSession:
         self.Roshambo_result = None
         self._banter = None
         self._in_battle = False
+        self._match_task = None
+        self._summoning = None
+        self._batch = None
+        self._batch_i = 0
         self._cpu_tried = set()
         self._cpu_tried_turn = -1
         self._lp = {0: 8000, 1: 8000}
@@ -8526,7 +8758,7 @@ class DuelSession:
         next_uid = 1
 
         for team in (client_team, cpu_team):
-            yo3_player = team_to_client[team]
+            ygo3_player = team_to_client[team]
 
             for index, (row, code) in enumerate(team_cards[team]["main"]):
                 uid = next_uid
@@ -8534,13 +8766,13 @@ class DuelSession:
 
                 uid_by_team_code[team].setdefault(code, []).append((uid, row))
 
-                table_place = yo3_player | (0x0D << 8) | (index << 16)
+                table_place = ygo3_player | (0x0D << 8) | (index << 16)
                 await self.send_engine_command(
                     1000,
                     [
                         uid,
-                        row if yo3_player == 0 else 0,
-                        self._cid(row if yo3_player == 0 else 0),
+                        row if ygo3_player == 0 else 0,
+                        self._cid(row if ygo3_player == 0 else 0),
                         table_place,
                     ],
                 )
@@ -8550,13 +8782,13 @@ class DuelSession:
                 next_uid += 1
 
                 extra_pool[team].setdefault(code, []).append((uid, row))
-                table_place = yo3_player | (0x0C << 8) | (index << 16)
+                table_place = ygo3_player | (0x0C << 8) | (index << 16)
                 await self.send_engine_command(
                     1000,
                     [
                         uid,
-                        row if yo3_player == 0 else 0,
-                        self._cid(row if yo3_player == 0 else 0),
+                        row if ygo3_player == 0 else 0,
+                        self._cid(row if ygo3_player == 0 else 0),
                         table_place,
                     ],
                 )
@@ -8701,6 +8933,7 @@ class DuelSession:
             duel_id, duel = await self._reseat(duel_id, duel)
 
         self.game_start_time = time.monotonic()
+        self._start_match_clock()
         await self.send_duel_timer(0 if order == YGO3_FIRST else 1)
         await self.send_engine_command(YGO3_FIRST_RESOLVE, [order, 0, 0, 0])
 
@@ -8719,6 +8952,34 @@ class DuelSession:
         )
 
     # Plays the player's hand against the CPU's; repeats on a draw.
+    def _cancel_match_clock(self):
+        task, self._match_task = self._match_task, None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+
+    def _start_match_clock(self):
+        """The match's time (DUEL_TOTAL_TIME from the turn order's resolution, the same clock the client shows)
+        is enforced here: nothing else ends a duel whose time runs out."""
+        self._cancel_match_clock()
+        self._match_task = asyncio.create_task(self._match_timeout())
+
+    async def _match_timeout(self):
+        try:
+            left = DUEL_TOTAL_TIME - (time.monotonic() - self.game_start_time)
+            await asyncio.sleep(max(0.0, left))
+            if self.closed or self.duel_ended:
+                return
+            log.info(
+                "[Duel] Match time (%d seconds) ran out: the duel is a draw",
+                DUEL_TOTAL_TIME,
+            )
+            self._match_task = None
+            await self._finish_duel(3, 0)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            log.exception("[Duel] The match clock failed")
+
     def _cancel_Roshambo_timeout(self):
         task, self._Roshambo_task = self._Roshambo_task, None
         if task is not None and task is not asyncio.current_task():
@@ -9091,6 +9352,209 @@ class DuelSession:
         )
 
     # Mirrors an engine MSG_MOVE to the client's card table.
+    # --- Tribute, Fusion and Synchro Summons as Konami's server showed them ---------
+    @staticmethod
+    def _summon_family(reason):
+        """The family of a material's move by its reason: a tribute for a summon, a Fusion or Synchro material."""
+        if reason & REASON_RELEASE and reason & REASON_SUMMON:
+            return "tribute"
+        if reason & REASON_MATERIAL and reason & REASON_SYNCHRO:
+            return "synchro"
+        if reason & REASON_MATERIAL and reason & REASON_FUSION:
+            return "fusion"
+        # Contact Fusions (Gladiator Beasts...) send their materials as a cost with no Fusion reason.
+        if reason & REASON_MATERIAL and not reason & (
+            REASON_RELEASE | REASON_RITUAL | REASON_XYZ
+        ):
+            return "contact"
+        return None
+
+    def _is_tuner(self, code):
+        try:
+            row = DUEL_ENGINE.database.get_card(int(code))
+            return bool(row is not None and int(row["type"]) & 0x1000)
+        except Exception:
+            return False
+
+    def _material_peek(self, team, location, sequence, code, taken):
+        """(uid, row) of the card an engine place names, among the cards not yet `taken` in this batch."""
+        if location == LOC_HAND:
+            left = [e for e in self.m_hand.get(team, []) if e[0] not in taken]
+            if (
+                0 <= sequence < len(left)
+                and self.uid_to_code.get(left[sequence][0]) == code
+            ):
+                return left[sequence][0], left[sequence][1]
+            return next(
+                ((e[0], e[1]) for e in left if self.uid_to_code.get(e[0]) == code), None
+            )
+        if location in (LOC_MZONE, LOC_SZONE):
+            entry = self.m_field.get((team, location, sequence))
+            if (
+                entry
+                and entry[0] not in taken
+                and self.uid_to_code.get(entry[0]) == code
+            ):
+                return entry[0], entry[1]
+            for (t, loc, _seq), e in self.m_field.items():
+                if (
+                    t == team
+                    and loc == location
+                    and e[0] not in taken
+                    and self.uid_to_code.get(e[0]) == code
+                ):
+                    return e[0], e[1]
+        return None
+
+    async def _summon_before_move(self, msg):
+        """Before a MOVE: a Tribute, Fusion or Synchro Summon's commands. The first material's move marks every
+        material of the summon that moves in this batch; each plays its effect before its own move, except a
+        Synchro's, which are all tuned at the first, the Tuners first (the client's first Tuner starts its level
+        sums again, and the Synchro animation crashed on sums that left one out). A Fusion's materials from the
+        hand crashed the client when their effects ran ahead of the first move."""
+        reason = int(msg.get("reason", 0))
+        family = self._summon_family(reason)
+        src = msg.get("from", {})
+        s_team, s_loc, s_seq = (
+            int(src.get("controller", 0)),
+            int(src.get("location", 0)),
+            int(src.get("sequence", 0)),
+        )
+        if not family:
+            # A tribute for a Set: the monster goes to its zone face down and no summon follows.
+            dst = msg.get("to", {})
+            if (
+                self._summoning
+                and self._summoning["family"] == "tribute"
+                and int(dst.get("location", 0)) == LOC_MZONE
+                and int(dst.get("position", 0)) & 0xA
+            ):
+                self._summoning = None
+            return
+        s = self._summoning
+        if not (s and s["family"] == family and not s["arrived"]):
+            s = {
+                "family": family,
+                "count": 0,
+                "tuned": 0,
+                "arrived": False,
+                "code": 0,
+                "played": [],
+                "uids": [],
+            }
+        here = self._material_peek(s_team, s_loc, s_seq, int(msg.get("card", 0)), [])
+        # This material was marked already (by the first of its batch): it plays its effect now.
+        if here is not None:
+            for i, (uid, run) in enumerate(s["played"]):
+                if uid == here[0]:
+                    del s["played"][i]
+                    if run:
+                        await self.send_engine_command(run[0], run[1])
+                    self._summoning = s
+                    return
+        materials, taken = [], []
+        for x in (self._batch[self._batch_i :] if self._batch else [msg]):
+            if (
+                x.get("type") != MSG["MOVE"]
+                or self._summon_family(int(x.get("reason", 0))) != family
+            ):
+                continue
+            f = x.get("from", {})
+            team, loc, seq = (
+                int(f.get("controller", 0)),
+                int(f.get("location", 0)),
+                int(f.get("sequence", 0)),
+            )
+            code = int(x.get("card", 0))
+            found = self._material_peek(team, loc, seq, code, taken)
+            if found is None:
+                continue
+            taken.append(found[0])
+            materials.append(
+                (
+                    found[0],
+                    found[1],
+                    self._cp(team),
+                    self._zone(loc, seq),
+                    family == "synchro" and self._is_tuner(code),
+                )
+            )
+        if family == "synchro":
+            materials.sort(
+                key=lambda m: not m[4]
+            )  # the Tuners first, otherwise in order
+        marks = {
+            "tribute": (CMD_TRIBUTE_SET, CMD_TRIBUTE_RUN),
+            "fusion": (CMD_MATERIAL_SET, CMD_MATERIAL_RUN),
+            "synchro": (CMD_TUNING_SET, CMD_TUNING_RUN),
+        }.get(family)
+        runs = []
+        for uid, row, player, zone, tuner in materials:
+            if marks:
+                await self.send_engine_command(marks[0], [player, zone, uid, 0])
+        for uid, row, player, zone, tuner in materials:
+            card = GAME.cards.get(int(row)) if row else None
+            level = int(card.level) if card is not None else 0
+            variant = 0
+            if family == "synchro":
+                if tuner:
+                    s["tuned"] += 1
+                    variant = level | (0x100 if s["tuned"] == 1 else 0x200)
+                else:
+                    variant = level
+            runs.append(
+                (uid, (marks[1], [player, zone, uid, variant]) if marks else None)
+            )
+        s["count"] += len(materials)
+        s["uids"].extend(m[0] for m in materials)
+        if family == "synchro":
+            for i, (uid, run) in enumerate(runs):
+                if run:
+                    await self.send_engine_command(run[0], run[1])
+                runs[i] = (uid, None)
+        if here is not None:
+            for i, (uid, run) in enumerate(runs):
+                if uid == here[0]:
+                    del runs[i]
+                    if run:
+                        await self.send_engine_command(run[0], run[1])
+                    break
+        s["played"] = runs
+        self._summoning = s
+
+    async def _summon_arrival(self, msg, team, location, uid, code):
+        """The Extra Deck monster's arrival: its materials, the Fusion/Synchro animation and its summon line
+        (Konami's logs: 8 for a Synchro, 6 for a Fusion)."""
+        s = self._summoning
+        reason = int(msg.get("reason", 0))
+        if not (s and reason & REASON_SPSUMMON and location == LOC_EXTRA):
+            return
+        if s["family"] == "tribute" or s["arrived"]:
+            return
+        kind, line = {"synchro": (2, SUMMON_SYNCHRO), "contact": (1, SUMMON_EXTRA)}.get(
+            s["family"], (0, SUMMON_EXTRA)
+        )
+        uids = s["uids"]
+        at = lambda seq, i: seq[i] if i < len(seq) else 0
+        await self.send_engine_command(
+            CMD_MATERIAL_LIST, [len(uids), at(uids, 0), at(uids, 1), at(uids, 2)]
+        )
+        rest = uids[3:]
+        for start in range(0, len(rest), 4):
+            chunk = rest[start : start + 4]
+            await self.send_engine_command(
+                CMD_MATERIAL_LIST_MORE, [at(chunk, i) for i in range(4)]
+            )
+        player = self._cp(team)
+        await self.send_engine_command(
+            CMD_RUN_FUSION, [player, uid, (kind << 16) | s["count"], 0]
+        )
+        await self.send_engine_command(
+            CMD_SPEAK_SUMMON, [player, 0x8000 | uid, line, 0]
+        )
+        s["arrived"] = True
+        s["code"] = int(code)
+
     async def _on_move(self, msg):
         src, dst = msg.get("from", {}), msg.get("to", {})
         code = int(msg.get("card", 0))
@@ -9112,6 +9576,14 @@ class DuelSession:
             taken = (uid, row, d_pos, 0)
             s_zone_hint = None
         else:
+            if SUMMON_ANIMATIONS:
+                try:
+                    await self._summon_before_move(msg)
+                except Exception:
+                    log.exception(
+                        "[Duel] Summon animation (materials) failed; continuing without it"
+                    )
+                    self._summoning = None
             taken = self._take(s_team, s_loc, s_seq, code)
             s_zone_hint = True
             if taken is None:
@@ -9124,6 +9596,14 @@ class DuelSession:
 
         uid, row, old_pos, s_idx = taken
         s_player, d_player = self._cp(s_team), self._cp(d_team)
+        if SUMMON_ANIMATIONS and s_loc:
+            try:
+                await self._summon_arrival(msg, s_team, s_loc, uid, code)
+            except Exception:
+                log.exception(
+                    "[Duel] Summon animation (arrival) failed; continuing without it"
+                )
+                self._summoning = None
 
         if d_loc == 0:
             s_zone = self._zone(s_loc, s_seq)
@@ -9136,7 +9616,7 @@ class DuelSession:
         s_position = int(src.get("position", old_pos)) if s_loc else d_pos
 
         # A destroyed card (REASON_DESTROY, 0x1) leaving the field or the hand: CardVanish before its
-        # move, as the revival server sends it; without it the card stays drawn after a battle.
+        # move; without it the card stays drawn after a battle.
         if int(msg.get("reason", 0)) & 0x1 and s_loc and s_zone <= 0x0B:
             await self.send_engine_command(
                 0x1F, [s_player, s_zone | (s_index << 8), 0, 0]
@@ -9174,6 +9654,36 @@ class DuelSession:
         if d_loc == LOC_MZONE and d_pos & (POS_FACEUP_ATTACK | POS_FACEUP_DEFENSE):
             await self._send_monster_record(d_player, d_zone, row)
 
+        if FIELD_BACKGROUND and (
+            d_zone == FIELD_SPELL_ZONE or s_zone == FIELD_SPELL_ZONE
+        ):
+            try:
+                await self._field_change(row, d_zone, d_pos, s_zone, s_position)
+            except Exception:
+                log.exception(
+                    "[Duel] Field Spell background failed; continuing without it"
+                )
+
+    async def _field_change(self, row, to_zone, to_pos, from_zone, from_pos):
+        """The duel field's background: the Field Spell's Konami id when a card is face up in the Field zone,
+        0 when a face-up one leaves it (as Konami's server sent it, after the move's commands).
+        """
+        faceup = POS_FACEUP_ATTACK | 0x4  # POS_FACEUP_ATTACK, POS_FACEUP_DEFENSE
+        if to_zone == FIELD_SPELL_ZONE and to_pos & faceup:
+            log.info(
+                "[Duel] Field Spell background: row %s, Konami id %s",
+                row,
+                self._cid(row),
+            )
+            await self.send_engine_command(CMD_FIELD_CHANGE, [self._cid(row), 0, 0, 0])
+        elif (
+            from_zone == FIELD_SPELL_ZONE
+            and from_pos & faceup
+            and to_zone != FIELD_SPELL_ZONE
+        ):
+            log.info("[Duel] Field Spell background: cleared")
+            await self.send_engine_command(CMD_FIELD_CHANGE, [0, 0, 0, 0])
+
     # Mirrors a position change (attack/defense, face-up/down).
     async def _on_position(self, team, location, sequence, code, new_position):
         key = (team, location, sequence)
@@ -9205,12 +9715,24 @@ class DuelSession:
             POS_FACEUP_ATTACK | POS_FACEUP_DEFENSE
         ):
             await self._send_monster_record(player, zone, row)
+        if FIELD_BACKGROUND and zone == FIELD_SPELL_ZONE and location == LOC_SZONE:
+            try:
+                await self._field_change(row, zone, new_position, zone, old_position)
+            except Exception:
+                log.exception(
+                    "[Duel] Field Spell background failed; continuing without it"
+                )
 
     # Translates one engine event to client commands (summons, attacks, damage, chains...).
     async def _translate_event(self, msg):
         t = msg.get("type")
         if t == MSG["NEW_TURN"]:
             team = int(msg.get("player", 0))
+            if SUMMON_ANIMATIONS and self.turn_count > 0 and self.turn_team is not None:
+                # The turn's end speaks for the player whose turn it was.
+                await self.send_engine_command(
+                    CMD_SPEAK_TURN_END, [self._cp(self.turn_team), 0, 0, 0]
+                )
             self.turn_team = team
             self.phase_index = None
             if isinstance(self._banter, dict):
@@ -9234,6 +9756,7 @@ class DuelSession:
                 await self.send_engine_command(6, [self._cp(team), 0, 0, 0])
             self.turn_count += 1
         elif t == MSG["NEW_PHASE"]:
+            self._summoning = None
             phase = int(msg.get("phase", 0))
             index = (
                 0
@@ -9264,6 +9787,10 @@ class DuelSession:
                 self.phase_index = index
                 team = self.turn_team if self.turn_team is not None else 0
                 await self.send_engine_command(5, [self._cp(team), index, 0, 0])
+                if SUMMON_ANIMATIONS and index == 0:
+                    await self.send_engine_command(
+                        CMD_SPEAK_DRAW, [self._cp(team), 1, 0, 0]
+                    )
         elif t == MSG["DRAW"]:
             team = int(msg.get("player", 0))
             player = self._cp(team)
@@ -9303,8 +9830,27 @@ class DuelSession:
         elif t in (MSG["SUMMONING"], MSG["SPSUMMONING"]):
             team, seq = int(msg.get("controller", 0)), int(msg.get("sequence", 0))
             found = self._lookup(team, LOC_MZONE, seq, msg.get("code", 0))
+            summoning, self._summoning = self._summoning, None
             if found:
                 player = self._cp(team)
+                if SUMMON_ANIMATIONS:
+                    # The summon line first: 0 a Normal Summon, 1 a Tribute Summon, 5 a Special Summon; not
+                    # again for an Extra Deck monster whose arrival already said its own.
+                    spoken = bool(
+                        summoning
+                        and summoning["arrived"]
+                        and summoning["code"] == int(msg.get("code", 0))
+                    )
+                    tribute = bool(summoning and summoning["family"] == "tribute")
+                    kind = (
+                        (SUMMON_TRIBUTE if tribute else SUMMON_NORMAL)
+                        if t == MSG["SUMMONING"]
+                        else SUMMON_SPECIAL
+                    )
+                    if not spoken:
+                        await self.send_engine_command(
+                            CMD_SPEAK_SUMMON, [player, 0x8000 | found[0], kind, 0]
+                        )
                 # The place as moves give it, with its face and position bits (Konami's logs: 0x4000 | place);
                 # the effect plays at that zone (0x514E5A).
                 place = self._place_word(
@@ -9326,13 +9872,29 @@ class DuelSession:
                 int(msg.get("position", 0)),
             )
         elif t == MSG["FLIPSUMMONING"]:
+            team, seq = int(msg.get("controller", 0)), int(msg.get("sequence", 0))
+            found = (
+                self._lookup(team, LOC_MZONE, seq, msg.get("code", 0))
+                if SUMMON_ANIMATIONS
+                else None
+            )
+            player = self._cp(team)
+            if found:
+                await self.send_engine_command(
+                    CMD_SPEAK_SUMMON, [player, 0x8000 | found[0], SUMMON_FLIP, 0]
+                )
             await self._on_position(
-                int(msg.get("controller", 0)),
+                team,
                 LOC_MZONE,
-                int(msg.get("sequence", 0)),
+                seq,
                 msg.get("code", 0),
                 POS_FACEUP_ATTACK,
             )
+            if found:
+                place = self._place_word(
+                    player, self._zone(LOC_MZONE, seq), 0, POS_FACEUP_ATTACK
+                )
+                await self.send_engine_command(0x38, [place, found[0], 1, 0])
         elif t in (MSG["DAMAGE"], MSG["RECOVER"], MSG["PAY_LPCOST"]):
             player = int(msg.get("player", 0))
             amount = int(msg.get("amount", 0))
@@ -9478,6 +10040,20 @@ class DuelSession:
                     msg.get("sequence", 0),
                     msg.get("code", 0),
                 )
+                if found and SUMMON_ANIMATIONS:
+                    # The activation line: a Spell/Trap says 2 then 3 (as from the hand, since a Set card is
+                    # face up by its MSG_CHAINING), a monster 4.
+                    if 5 <= zone <= 10:
+                        await self.send_engine_command(
+                            CMD_SPEAK_ACTIVATE, [link_player, 0x8000 | found[0], 2, 0]
+                        )
+                        await self.send_engine_command(
+                            CMD_SPEAK_ACTIVATE, [link_player, 0x8000 | found[0], 3, 0]
+                        )
+                    else:
+                        await self.send_engine_command(
+                            CMD_SPEAK_ACTIVATE, [link_player, 0x8000 | found[0], 4, 0]
+                        )
                 if found:
                     await self.send_engine_command(
                         0x22,
@@ -9642,6 +10218,7 @@ class DuelSession:
         if self.duel_ended:
             return
         self.duel_ended = True
+        self._cancel_match_clock()
         log.info(
             "[Duel] Ending duel: result=%s reason=%s (1 win, 2 loss, 3 draw)",
             result,
@@ -10781,9 +11358,10 @@ class DuelSession:
 
     # Translates a batch of events, then the prompt, if any.
     async def _translate(self, duel, events):
-        for msg in events:
+        for i, msg in enumerate(events):
             if msg.get("type") == MSG["RETRY"]:
                 log.warning("[Duel] The engine refused the last answer (MSG_RETRY)")
+            self._batch, self._batch_i = events, i
             await self._translate_event(msg)
         prompt = next((m for m in reversed(events) if m.get("type") in PROMPTS), None)
         duel["pending_prompt"] = prompt
@@ -11358,6 +11936,7 @@ class DuelSession:
         finally:
             self.closed = True
             self._cancel_Roshambo_timeout()
+            self._cancel_match_clock()
             if self.duel_id is not None and self.player_id is not None:
                 DUEL_CONNECTIONS.pop((self.duel_id, self.player_id), None)
                 if self.duel_ended and DUEL_MANAGER is not None:
@@ -11408,7 +11987,7 @@ async def send_http(
     await writer.drain()
 
 
-# Serves GET/HEAD for files under /yo3/, /ygoda/patch/ and /app/ from the www folder
+# Serves GET/HEAD for files under /ygo3/, /ygoda/patch/ and /app/ from the www folder
 # (path traversal is refused).
 async def http_client(reader, writer):
     addr = writer.get_extra_info("peername")
@@ -11426,7 +12005,7 @@ async def http_client(reader, writer):
             return
 
         path = unquote(urlsplit(target).path)
-        if not path.startswith(("/yo3/", "/ygoda/patch/", "/app/")):
+        if not path.startswith(("/ygo3/", "/ygoda/patch/", "/app/")):
             await send_http(writer, "404 Not Found", b"Not found")
             return
 
@@ -11695,7 +12274,7 @@ if __name__ == "__main__":
         try:
             for card in GAME.cards.values():
                 try:
-                    database.resolve_yo3_card(card)
+                    database.resolve_ygo3_card(card)
                 except DuelDeckError as exc:
                     failures.append((card, str(exc)))
 
