@@ -1,0 +1,2739 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="icon.ico">
+    <title>ygo3-research | Server Control Dashboard</title>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap');
+
+        :root {
+            /* Dynamic GUI Preferences */
+            --base-font-size: 14px;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-display: 'Space Grotesk', 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', Consolas, monospace;
+
+            /* Radii */
+            --radius-xs: 6px;
+            --radius-sm: 9px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }
+
+        /* ============================================================
+           DARK THEME (DEFAULT)
+        ============================================================ */
+        :root,
+        [data-theme="dark"] {
+            color-scheme: dark;
+            --bg-canvas: #060911;
+            --bg-dot: rgba(148, 163, 184, 0.07);
+            --bg-gradient-1: rgba(56, 189, 248, 0.08);
+            --bg-gradient-2: rgba(99, 102, 241, 0.06);
+
+            --bg-sidebar: rgba(10, 14, 24, 0.92);
+            --bg-topbar: rgba(10, 14, 24, 0.78);
+            --panel: rgba(15, 22, 36, 0.85);
+            --panel-solid: #0f1624;
+            --panel-elevated: #172136;
+            --panel-hover: #1d2942;
+            --surface-deep: #080c16;
+            --input-focus-bg: #0a101d;
+
+            --border: rgba(255, 255, 255, 0.08);
+            --border-subtle: rgba(255, 255, 255, 0.05);
+            --border-hover: rgba(56, 189, 248, 0.45);
+            --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+            --accent: #38bdf8;
+            --accent-bright: #7dd3fc;
+            --accent-soft: rgba(56, 189, 248, 0.12);
+            --accent-border: rgba(56, 189, 248, 0.26);
+            --accent-glow: rgba(56, 189, 248, 0.16);
+
+            --text-heading: #ffffff;
+            --text: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --muted: #64748b;
+
+            --nav-active-bg: rgba(56, 189, 248, 0.11);
+            --nav-active-text: #ffffff;
+            --nav-hover-bg: rgba(255, 255, 255, 0.04);
+
+            --switch-bg: #1e293b;
+            --switch-knob: #94a3b8;
+
+            --console-bg: #04060b;
+            --console-text: #cbd5e1;
+            --console-time: #475569;
+            --console-hover: rgba(255, 255, 255, 0.035);
+            --console-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.75);
+            --log-error: #fda4af;
+            --log-warn: #fde047;
+            --log-success: #6ee7b7;
+            --log-info: #bae6fd;
+
+            --callout-warn-bg: rgba(245, 158, 11, 0.09);
+            --callout-warn-border: rgba(245, 158, 11, 0.25);
+            --callout-warn-text: #fcd34d;
+
+            --success: #10b981;
+            --danger: #f43f5e;
+            --warn: #f59e0b;
+
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+            --shadow-md: 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+            --toast-bg: rgba(21, 30, 50, 0.94);
+        }
+
+        /* ============================================================
+           LIGHT THEME (CRISP ENTERPRISE SLATE)
+        ============================================================ */
+        [data-theme="light"] {
+            color-scheme: light;
+            --bg-canvas: #f1f5f9;
+            --bg-dot: rgba(15, 23, 42, 0.06);
+            --bg-gradient-1: rgba(2, 132, 199, 0.06);
+            --bg-gradient-2: rgba(99, 102, 241, 0.05);
+
+            --bg-sidebar: rgba(255, 255, 255, 0.94);
+            --bg-topbar: rgba(255, 255, 255, 0.85);
+            --panel: rgba(255, 255, 255, 0.96);
+            --panel-solid: #ffffff;
+            --panel-elevated: #f8fafc;
+            --panel-hover: #f1f5f9;
+            --surface-deep: #f8fafc;
+            --input-focus-bg: #ffffff;
+
+            --border: rgba(15, 23, 42, 0.10);
+            --border-subtle: rgba(15, 23, 42, 0.06);
+            --border-hover: rgba(2, 132, 199, 0.45);
+            --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+
+            --accent: #0284c7;
+            --accent-bright: #0369a1;
+            --accent-soft: rgba(2, 132, 199, 0.09);
+            --accent-border: rgba(2, 132, 199, 0.24);
+            --accent-glow: rgba(2, 132, 199, 0.14);
+
+            --text-heading: #0f172a;
+            --text: #1e293b;
+            --text-secondary: #475569;
+            --muted: #64748b;
+
+            --nav-active-bg: rgba(2, 132, 199, 0.10);
+            --nav-active-text: #0369a1;
+            --nav-hover-bg: rgba(15, 23, 42, 0.04);
+
+            --switch-bg: #cbd5e1;
+            --switch-knob: #ffffff;
+
+            --console-bg: #f8fafc;
+            --console-text: #1e293b;
+            --console-time: #64748b;
+            --console-hover: rgba(15, 23, 42, 0.045);
+            --console-shadow: inset 0 2px 6px rgba(15, 23, 42, 0.06);
+            --log-error: #e11d48;
+            --log-warn: #b45309;
+            --log-success: #047857;
+            --log-info: #0369a1;
+
+            --callout-warn-bg: #fffbeb;
+            --callout-warn-border: #fde68a;
+            --callout-warn-text: #b45309;
+
+            --success: #059669;
+            --danger: #e11d48;
+            --warn: #d97706;
+
+            --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+            --shadow-md: 0 8px 24px -6px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+            --toast-bg: rgba(255, 255, 255, 0.96);
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        html {
+            font-size: var(--base-font-size);
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--bg-canvas);
+            background-image:
+                radial-gradient(var(--bg-dot) 1px, transparent 1px),
+                radial-gradient(circle at 20% 0%, var(--bg-gradient-1), transparent 42%),
+                radial-gradient(circle at 85% 95%, var(--bg-gradient-2), transparent 45%);
+            background-size: 24px 24px, 100% 100%, 100% 100%;
+            color: var(--text);
+            font-family: var(--font-sans);
+            font-size: 1rem;
+            height: 100vh;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.24);
+            border-radius: 99px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(148, 163, 184, 0.42);
+        }
+
+        button,
+        input,
+        select {
+            font: inherit;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.45;
+        }
+
+        /* ============================================================
+           CSS GRID APPLICATION SHELL
+        ============================================================ */
+        .app-container {
+            display: grid;
+            grid-template-columns: 276px minmax(0, 1fr);
+            grid-template-rows: 100vh;
+            grid-template-areas: "sidebar workspace";
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .mobile-header {
+            display: none;
+        }
+
+        /* SIDEBAR GRID */
+        .sidebar {
+            grid-area: sidebar;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            gap: 20px;
+            height: 100vh;
+            overflow-y: auto;
+            padding: 22px 16px;
+            background: var(--bg-sidebar);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-right: 1px solid var(--border);
+            z-index: 1001;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+
+        .sidebar-header {
+            display: grid;
+            grid-auto-rows: max-content;
+            gap: 16px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .brand-wrap {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            padding: 0 6px;
+        }
+
+        .brand-title {
+            display: grid;
+            grid-auto-flow: column;
+            justify-content: start;
+            align-items: center;
+            gap: 10px;
+            font-family: var(--font-display);
+            font-size: 1.32rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--text-heading);
+        }
+
+        .brand-title .accent {
+            color: var(--accent);
+        }
+
+        .version-tag {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 99px;
+            background: var(--surface-deep);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        /* NAVIGATION */
+        .nav-groups {
+            display: grid;
+            align-content: start;
+            gap: 18px;
+        }
+
+        .nav-section-label {
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+            padding: 0 12px 6px;
+        }
+
+        .sidebar nav {
+            display: grid;
+            gap: 4px;
+        }
+
+        .nav-button {
+            position: relative;
+            display: grid;
+            grid-template-columns: 16px 1fr;
+            align-items: center;
+            gap: 11px;
+            width: 100%;
+            padding: 10px 12px;
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            text-align: left;
+            font-size: 0.95rem;
+            font-weight: 500;
+            border-radius: var(--radius-sm);
+            transition: all 0.16s ease;
+        }
+
+        .nav-icon {
+            width: 16px;
+            height: 16px;
+            color: var(--muted);
+            transition: color 0.16s ease;
+        }
+
+        .nav-button:hover {
+            background: var(--nav-hover-bg);
+            color: var(--text-heading);
+        }
+
+        .nav-button:hover .nav-icon {
+            color: var(--accent);
+        }
+
+        .nav-button.active {
+            background: var(--nav-active-bg);
+            border-color: var(--accent-border);
+            color: var(--nav-active-text);
+            font-weight: 600;
+        }
+
+        .nav-button.active::before {
+            content: "";
+            position: absolute;
+            left: -16px;
+            top: 22%;
+            bottom: 22%;
+            width: 3px;
+            border-radius: 0 4px 4px 0;
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+        }
+
+        .nav-button.active .nav-icon {
+            color: var(--accent);
+        }
+
+        /* SIDEBAR FOOTER */
+        .sidebar-footer {
+            display: grid;
+            gap: 10px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .config-badge {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 11px;
+            background: var(--surface-deep);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+        }
+
+        .config-badge-left {
+            display: grid;
+            grid-template-columns: 14px minmax(0, 1fr);
+            align-items: center;
+            gap: 7px;
+        }
+
+        .config-badge span {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .tiny-icon {
+            width: 14px;
+            height: 14px;
+            color: var(--accent);
+        }
+
+        /* ============================================================
+           MAIN WORKSPACE GRID
+        ============================================================ */
+        .content-area {
+            grid-area: workspace;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* TOP TELEMETRY BAR */
+        .topbar {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 16px;
+            padding: 13px 36px;
+            background: var(--bg-topbar);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+
+        .telemetry-strip {
+            display: grid;
+            grid-auto-flow: column;
+            justify-content: start;
+            align-items: center;
+            gap: 9px;
+            overflow-x: auto;
+        }
+
+        .telemetry-chip {
+            display: grid;
+            grid-auto-flow: column;
+            align-items: center;
+            gap: 7px;
+            padding: 5px 11px;
+            background: var(--surface-deep);
+            border: 1px solid var(--border);
+            border-radius: 99px;
+            font-size: 0.84rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .telemetry-chip strong {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-heading);
+            font-weight: 600;
+        }
+
+        .telemetry-chip i {
+            width: 13px;
+            height: 13px;
+            color: var(--accent);
+        }
+
+        .topbar-controls {
+            display: grid;
+            grid-auto-flow: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .main {
+            padding: 28px 36px;
+            overflow-y: auto;
+        }
+
+        .tab {
+            display: none;
+            max-width: 1240px;
+            margin: 0 auto;
+            padding-bottom: 48px;
+        }
+
+        .tab.active {
+            display: grid;
+            grid-auto-rows: max-content;
+            gap: 20px;
+            animation: slideUpFade 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .tab.active.fill-tab {
+            grid-template-rows: auto minmax(440px, 1fr);
+            height: 100%;
+            padding-bottom: 0;
+        }
+
+        @keyframes slideUpFade {
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* PAGE HEADER */
+        .page-header {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: end;
+            gap: 20px;
+            margin-bottom: 4px;
+        }
+
+        .page-header h2 {
+            margin: 0;
+            font-family: var(--font-display);
+            font-size: 1.9rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--text-heading);
+            line-height: 1.15;
+        }
+
+        .page-header p {
+            margin: 5px 0 0;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* BENTO KPI GRID */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        .kpi-card {
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            gap: 8px;
+            padding: 16px 18px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm), var(--panel-highlight);
+            transition: border-color 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+        }
+
+        .kpi-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-1px);
+        }
+
+        .kpi-top {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            color: var(--text-secondary);
+            font-size: 0.84rem;
+            font-weight: 500;
+        }
+
+        .kpi-top i {
+            width: 15px;
+            height: 15px;
+            color: var(--accent);
+        }
+
+        .kpi-value {
+            font-family: var(--font-mono);
+            font-size: 1.18rem;
+            font-weight: 600;
+            color: var(--text-heading);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .kpi-sub {
+            font-size: 0.8rem;
+            color: var(--muted);
+        }
+
+        /* PANELS */
+        .panel {
+            display: grid;
+            grid-auto-rows: max-content;
+            padding: 24px 26px;
+            background: var(--panel);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md), var(--panel-highlight);
+            transition: border-color 0.2s ease, background-color 0.2s ease;
+        }
+
+        .panel:hover {
+            border-color: var(--border-hover);
+        }
+
+        .narrow-panel {
+            max-width: 720px;
+            width: 100%;
+        }
+
+        .panel-header {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 12px;
+            padding-bottom: 16px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .panel-title-group {
+            display: grid;
+            grid-auto-flow: column;
+            justify-content: start;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .panel-title-icon {
+            width: 17px;
+            height: 17px;
+            color: var(--accent);
+        }
+
+        .panel h3 {
+            margin: 0;
+            font-size: 1.08rem;
+            font-weight: 600;
+            color: var(--text-heading);
+            letter-spacing: -0.01em;
+        }
+
+        .badge {
+            font-family: var(--font-mono);
+            font-size: 0.76rem;
+            font-weight: 500;
+            padding: 3px 10px;
+            border-radius: 99px;
+            background: var(--accent-soft);
+            color: var(--accent-bright);
+            border: 1px solid var(--accent-border);
+        }
+
+        .status-pill-inline {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--accent-bright);
+            background: var(--surface-deep);
+            padding: 4px 12px;
+            border-radius: 99px;
+            border: 1px solid var(--border);
+        }
+
+        .muted {
+            color: var(--text-secondary);
+            font-size: 0.94rem;
+            line-height: 1.65;
+            margin: 0;
+        }
+
+        /* CALLOUT BOXES */
+        .callout-box {
+            display: grid;
+            grid-template-columns: 16px minmax(0, 1fr);
+            align-items: center;
+            gap: 10px;
+            margin-top: 18px;
+            padding: 12px 15px;
+            border-radius: var(--radius-sm);
+            background: var(--callout-warn-bg);
+            border: 1px solid var(--callout-warn-border);
+            color: var(--callout-warn-text);
+            font-size: 0.9rem;
+        }
+
+        .callout-box.subtle {
+            background: var(--surface-deep);
+            border-color: var(--border);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 0.86rem;
+        }
+
+        .callout-icon {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* FORMS & INPUTS */
+        .field-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 16px;
+        }
+
+        .field-grid.two {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .field-grid.four {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .field {
+            display: grid;
+            grid-template-rows: auto 1fr;
+            gap: 7px;
+            min-width: 0;
+        }
+
+        .field.full {
+            grid-column: 1 / -1;
+        }
+
+        .field>span {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+        }
+
+        .input-with-actions {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) repeat(3, max-content);
+            gap: 8px;
+            align-items: center;
+            width: 100%;
+        }
+
+        .field input[type="text"],
+        .field input[type="number"],
+        .field input:not([type]),
+        .field select {
+            width: 100%;
+            min-width: 0;
+            height: 2.85rem;
+            padding: 0 13px;
+            color: var(--text);
+            background: var(--surface-deep);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.92rem;
+            outline: none;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+        }
+
+        .field input.mono {
+            font-family: var(--font-mono);
+            font-size: 0.88rem;
+        }
+
+        .field input:hover,
+        .field select:hover {
+            border-color: var(--border-hover);
+        }
+
+        .field input:focus,
+        .field select:focus {
+            border-color: var(--accent);
+            background: var(--input-focus-bg);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .field input::placeholder {
+            color: var(--muted);
+            opacity: 0.7;
+        }
+
+        .field select option {
+            background: var(--panel-solid);
+            color: var(--text);
+        }
+
+        /* SEGMENTED THEME PICKER & FONT SIZE CONTROLS */
+        .segmented-control {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            padding: 4px;
+            background: var(--surface-deep);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+        }
+
+        .segment-btn {
+            display: inline-grid;
+            grid-auto-flow: column;
+            place-content: center;
+            align-items: center;
+            gap: 7px;
+            height: 2.3rem;
+            padding: 0 12px;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            font-weight: 500;
+            transition: all 0.16s ease;
+        }
+
+        .segment-btn:hover {
+            color: var(--text-heading);
+        }
+
+        .segment-btn.active {
+            background: var(--panel-solid);
+            border-color: var(--border);
+            color: var(--accent-bright);
+            font-weight: 600;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .font-size-control {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto auto;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: var(--surface-deep);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+        }
+
+        .font-size-control input[type="range"] {
+            width: 100%;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        .size-pill {
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--accent-bright);
+            background: var(--accent-soft);
+            border: 1px solid var(--accent-border);
+            padding: 3px 9px;
+            border-radius: 6px;
+            min-width: 52px;
+            text-align: center;
+        }
+
+        /* MODERN TOGGLE SWITCH */
+        .toggle-card {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 16px;
+            padding: 15px 18px;
+            margin-bottom: 20px;
+            background: var(--surface-deep);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+        }
+
+        .toggle-card-text {
+            display: grid;
+            gap: 3px;
+        }
+
+        .toggle-card-text strong {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-heading);
+        }
+
+        .toggle-card-text span {
+            font-size: 0.84rem;
+            color: var(--muted);
+        }
+
+        .modern-switch {
+            display: inline-grid;
+            grid-auto-flow: column;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .modern-switch input {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .switch-track {
+            position: relative;
+            width: 42px;
+            height: 24px;
+            background: var(--switch-bg);
+            border: 1px solid var(--border);
+            border-radius: 99px;
+            transition: all 0.2s ease;
+        }
+
+        .switch-track::after {
+            content: "";
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--switch-knob);
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease;
+        }
+
+        .modern-switch input:checked+.switch-track {
+            background: var(--accent-soft);
+            border-color: var(--accent);
+        }
+
+        .modern-switch input:checked+.switch-track::after {
+            transform: translateX(18px);
+            background: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+        }
+
+        .modern-switch.compact .switch-track {
+            width: 34px;
+            height: 20px;
+        }
+
+        .modern-switch.compact .switch-track::after {
+            width: 14px;
+            height: 14px;
+        }
+
+        .modern-switch.compact input:checked+.switch-track::after {
+            transform: translateX(14px);
+        }
+
+        .toggle-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        /* BUTTONS */
+        .button-row {
+            display: grid;
+            grid-auto-flow: column;
+            justify-content: start;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .header-actions {
+            margin-top: 0;
+        }
+
+        .button {
+            display: inline-grid;
+            grid-auto-flow: column;
+            place-items: center;
+            gap: 7px;
+            height: 2.7rem;
+            padding: 0 16px;
+            color: var(--text);
+            background: var(--panel-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            font-weight: 500;
+            white-space: nowrap;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.16s ease;
+        }
+
+        .btn-icon {
+            width: 15px;
+            height: 15px;
+        }
+
+        .button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            border-color: var(--border-hover);
+            background: var(--panel-hover);
+        }
+
+        .button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .button.primary {
+            background: linear-gradient(180deg, #0ea5e9, #0284c7);
+            border-color: rgba(125, 211, 252, 0.4);
+            color: #ffffff;
+            font-weight: 600;
+            box-shadow: 0 2px 10px rgba(2, 132, 199, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        }
+
+        .button.primary:hover:not(:disabled) {
+            background: linear-gradient(180deg, #38bdf8, #0ea5e9);
+            box-shadow: 0 4px 16px rgba(14, 165, 233, 0.35);
+        }
+
+        .button.secondary {
+            background: var(--panel-elevated);
+            color: var(--text);
+        }
+
+        .button.secondary:hover:not(:disabled) {
+            background: var(--panel-hover);
+        }
+
+        .button.success {
+            background: linear-gradient(180deg, #10b981, #059669);
+            border-color: rgba(110, 231, 183, 0.35);
+            color: #ffffff;
+            font-weight: 600;
+            box-shadow: 0 2px 10px rgba(16, 185, 129, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+        }
+
+        .button.success:hover:not(:disabled) {
+            background: linear-gradient(180deg, #34d399, #10b981);
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.32);
+        }
+
+        .button.danger {
+            background: linear-gradient(180deg, #f43f5e, #e11d48);
+            border-color: rgba(253, 164, 175, 0.35);
+            color: #ffffff;
+            font-weight: 600;
+            box-shadow: 0 2px 10px rgba(244, 63, 94, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+        }
+
+        .button.danger:hover:not(:disabled) {
+            background: linear-gradient(180deg, #fb7185, #f43f5e);
+            box-shadow: 0 4px 16px rgba(244, 63, 94, 0.32);
+        }
+
+        .button.small {
+            height: 2.25rem;
+            padding: 0 12px;
+            font-size: 0.84rem;
+        }
+
+        .button.icon-only {
+            width: 2.25rem;
+            padding: 0;
+        }
+
+        .button.full {
+            width: 100%;
+        }
+
+        /* LOGS & CONSOLE GRID */
+        .log-panel {
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
+            min-height: 360px;
+        }
+
+        .fill-panel {
+            height: calc(100vh - 230px);
+            min-height: 440px;
+        }
+
+        .log-heading {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .log-toolbar {
+            display: grid;
+            grid-template-columns: minmax(200px, 340px) auto auto;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+            padding: 9px 12px;
+            background: var(--surface-deep);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+        }
+
+        .log-filter-group {
+            position: relative;
+            display: grid;
+            align-items: center;
+        }
+
+        .log-filter-group .filter-icon {
+            position: absolute;
+            left: 11px;
+            width: 14px;
+            height: 14px;
+            color: var(--muted);
+            pointer-events: none;
+        }
+
+        .log-filter-input {
+            width: 100%;
+            height: 2.25rem;
+            padding: 0 12px 0 33px;
+            background: var(--panel-solid);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xs);
+            color: var(--text);
+            font-size: 0.88rem;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+
+        .log-filter-input:focus {
+            border-color: var(--accent);
+        }
+
+        /* SEVERITY FILTER PILLS */
+        .filter-pills {
+            display: grid;
+            grid-auto-flow: column;
+            align-items: center;
+            gap: 3px;
+            background: var(--panel-solid);
+            padding: 3px;
+            border-radius: var(--radius-xs);
+            border: 1px solid var(--border);
+        }
+
+        .filter-pills .pill {
+            background: transparent;
+            border: none;
+            color: var(--muted);
+            font-size: 0.78rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 5px;
+            transition: all 0.15s ease;
+        }
+
+        .filter-pills .pill:hover {
+            color: var(--text-heading);
+        }
+
+        .filter-pills .pill.active {
+            background: var(--panel-elevated);
+            color: var(--accent-bright);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .modern-console {
+            min-height: 240px;
+            background: var(--console-bg);
+            color: var(--console-text);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 14px 16px;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.65;
+            overflow-y: auto;
+            display: grid;
+            align-content: start;
+            gap: 2px;
+            box-shadow: var(--console-shadow);
+            transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .modern-console:empty {
+            place-content: center;
+        }
+
+        .log-line {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 12px;
+            padding: 3px 6px;
+            border-radius: 4px;
+            word-break: break-word;
+            transition: background 0.12s ease;
+        }
+
+        .log-line:hover {
+            background: var(--console-hover);
+        }
+
+        .log-time {
+            color: var(--console-time);
+            user-select: none;
+            font-size: 0.78rem;
+        }
+
+        .log-text {
+            color: var(--console-text);
+        }
+
+        .log-line.error .log-text {
+            color: var(--log-error);
+        }
+
+        .log-line.warn .log-text {
+            color: var(--log-warn);
+        }
+
+        .log-line.success .log-text {
+            color: var(--log-success);
+        }
+
+        .log-line.info .log-text {
+            color: var(--log-info);
+        }
+
+        /* TOAST NOTIFICATIONS */
+        .toast {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            z-index: 2000;
+            max-width: min(440px, calc(100vw - 48px));
+            padding: 13px 18px;
+            color: var(--text);
+            background: var(--toast-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--accent);
+            border-radius: var(--radius-md);
+            box-shadow: 0 20px 40px -8px rgba(0, 0, 0, 0.35);
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(14px) scale(0.98);
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            font-size: 0.92rem;
+            font-weight: 500;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .toast.success {
+            border-left-color: var(--success);
+        }
+
+        .toast.error {
+            border-left-color: var(--danger);
+        }
+
+        @media (max-width: 1100px) {
+
+            .kpi-grid,
+            .field-grid.four {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .log-toolbar {
+                grid-template-columns: 1fr;
+                justify-items: start;
+            }
+        }
+    </style>
+
+    <!-- Local Offline Lucide Icons Script -->
+    <script src="lucide.min.js"></script>
+    <script type="text/javascript" src="/eel.js"></script>
+</head>
+
+<body>
+
+    <div class="app-container">
+
+        <!-- MOBILE TOPBAR -->
+        <header class="mobile-header">
+            <div class="brand-title">
+                <span>YGO3-<span class="accent">RESEARCH</span></span>
+            </div>
+            <button class="icon-btn" id="mobileMenuBtn" aria-label="Toggle Menu">
+                <i data-lucide="menu"></i>
+            </button>
+        </header>
+
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-wrap desktop-only">
+                    <div class="brand-title">
+                        <span>YGO3-<span class="accent">RESEARCH</span></span>
+                    </div>
+                    <span class="version-tag">v1.4</span>
+                </div>
+            </div>
+
+            <div class="nav-groups">
+                <div>
+                    <div class="nav-section-label">Control Plane</div>
+                    <nav aria-label="Main Navigation">
+                        <button class="nav-button active" data-tab="settings">
+                            <i data-lucide="sliders-horizontal" class="nav-icon"></i>
+                            <span>Server Settings</span>
+                        </button>
+                        <button class="nav-button" data-tab="bp">
+                            <i data-lucide="coins" class="nav-icon"></i>
+                            <span>BP Manager</span>
+                        </button>
+                        <button class="nav-button" data-tab="cards">
+                            <i data-lucide="layers" class="nav-icon"></i>
+                            <span>Card IDs</span>
+                        </button>
+                        <button class="nav-button" data-tab="ai">
+                            <i data-lucide="bot" class="nav-icon"></i>
+                            <span>NPC AI (LM Studio)</span>
+                        </button>
+                    </nav>
+                </div>
+
+                <div>
+                    <div class="nav-section-label">Observability</div>
+                    <nav aria-label="Telemetry Navigation">
+                        <button class="nav-button" data-tab="logs">
+                            <i data-lucide="terminal" class="nav-icon"></i>
+                            <span>Server Logs</span>
+                        </button>
+                        <button class="nav-button" data-tab="aiLogs">
+                            <i data-lucide="sparkles" class="nav-icon"></i>
+                            <span>AI Logs</span>
+                        </button>
+                    </nav>
+                </div>
+
+                <div>
+                    <div class="nav-section-label">Preferences</div>
+                    <nav aria-label="Preferences Navigation">
+                        <button class="nav-button" data-tab="gui">
+                            <i data-lucide="palette" class="nav-icon"></i>
+                            <span>GUI Settings</span>
+                        </button>
+                    </nav>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="config-badge" title="ygo3_launcher_config.json">
+                    <div class="config-badge-left">
+                        <i data-lucide="file-json" class="tiny-icon"></i>
+                        <span>ygo3_launcher_config.json</span>
+                    </div>
+                </div>
+                <button class="button primary full" id="saveSettingsButton" title="Shortcut: Ctrl + S">
+                    <i data-lucide="save" class="btn-icon"></i>
+                    <span>Save Configuration</span>
+                </button>
+                <button class="button secondary full" id="importConfigButton">
+                    <i data-lucide="upload" class="btn-icon"></i>
+                    <span>Import Configuration</span>
+                </button>
+                <input type="file" id="importConfigFileInput" accept=".json" style="display: none;">
+            </div>
+        </aside>
+
+        <div class="content-area">
+            <!-- PERSISTENT TELEMETRY & QUICK-CONTROL BAR -->
+            <div class="topbar">
+                <div class="telemetry-strip">
+                    <div class="telemetry-chip">
+                        <i data-lucide="network"></i>
+                        <span>Host: <strong id="chipHost">0.0.0.0</strong></span>
+                    </div>
+                    <div class="telemetry-chip">
+                        <i data-lucide="arrow-left-right"></i>
+                        <span>Ports: <strong id="chipPorts">7911 / 7921 / 7931</strong></span>
+                    </div>
+                    <div class="telemetry-chip">
+                        <i data-lucide="globe"></i>
+                        <span>HTTP: <strong id="chipHttp">8080</strong></span>
+                    </div>
+                    <div class="telemetry-chip">
+                        <i data-lucide="cpu"></i>
+                        <span>NPC AI: <strong id="chipAiState">Disabled</strong></span>
+                    </div>
+                </div>
+
+                <div class="topbar-controls">
+                    <button class="button success small" id="startServerButton">
+                        <i data-lucide="play" class="btn-icon"></i>
+                        <span>Start Server</span>
+                    </button>
+                    <button class="button danger small" id="stopServerButton">
+                        <i data-lucide="square" class="btn-icon"></i>
+                        <span>Stop Server</span>
+                    </button>
+                </div>
+            </div>
+
+            <main class="main">
+
+                <!-- SERVER SETTINGS -->
+                <section class="tab active" id="tab-settings">
+                    <header class="page-header">
+                        <div>
+                            <h2>Server Settings</h2>
+                            <p>Configure the YGO3 server runtime, game assets, Python environment, and network ports.
+                            </p>
+                        </div>
+                    </header>
+
+                    <!-- BENTO KPI OVERVIEW -->
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-top">
+                                <span>Server Status</span>
+                                <i data-lucide="activity"></i>
+                            </div>
+                            <div class="kpi-value" id="kpiEngineStatus">STOPPED</div>
+                        </div>
+
+                        <div class="kpi-card">
+                            <div class="kpi-top">
+                                <span>Gate / Duel TCP</span>
+                                <i data-lucide="server"></i>
+                            </div>
+                            <div class="kpi-value" id="kpiTcpPorts">7911 · 7931</div>
+                            <div class="kpi-sub" id="kpiFrontAddr">Front: 127.0.0.1:7921</div>
+                        </div>
+
+                        <div class="kpi-card">
+                            <div class="kpi-top">
+                                <span>NPC AI Bridge</span>
+                                <i data-lucide="bot"></i>
+                            </div>
+                            <div class="kpi-value" id="kpiAiMode">OFFLINE</div>
+                            <div class="kpi-sub" id="kpiAiModel">No active model</div>
+                        </div>
+
+                        <div class="kpi-card">
+                            <div class="kpi-top">
+                                <span>Default Target UID</span>
+                                <i data-lucide="user-check"></i>
+                            </div>
+                            <div class="kpi-value" id="kpiTargetUid">1001</div>
+                            <div class="kpi-sub">Shop BP injection target</div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title-group">
+                                <i data-lucide="folder-cog" class="panel-title-icon"></i>
+                                <h3>Directories, Files & Python</h3>
+                            </div>
+                            <span class="badge">Runtime Environment</span>
+                        </div>
+
+                        <div class="field-grid">
+                            <label class="field full">
+                                <span>32-bit Python Executable</span>
+                                <div class="input-with-actions">
+                                    <input class="mono" id="python_executable" placeholder="C:\Python39-32\python.exe">
+                                    <button type="button" class="button secondary" id="browsePythonBtn">
+                                        <i data-lucide="folder-open" class="btn-icon"></i>
+                                        <span>Browse</span>
+                                    </button>
+                                    <button type="button" class="button secondary" id="findPythonButton">
+                                        <i data-lucide="search" class="btn-icon"></i>
+                                        <span>Auto-Find</span>
+                                    </button>
+                                    <button type="button" class="button secondary" id="checkPythonButton">
+                                        <i data-lucide="check-circle-2" class="btn-icon"></i>
+                                        <span>Verify</span>
+                                    </button>
+                                </div>
+                            </label>
+
+                            <label class="field full">
+                                <span>Server Script (ygo3_server.py)</span>
+                                <div class="input-with-actions">
+                                    <input class="mono" id="server_script" placeholder="Path to ygo3_server.py">
+                                    <button type="button" class="button secondary" id="setLocalServerScriptBtn"
+                                        title="Set to ygo3_server.py in the same folder where GUI runs">
+                                        <i data-lucide="file-plus" class="btn-icon"></i>
+                                        <span>Same Folder</span>
+                                    </button>
+                                    <button type="button" class="button secondary" id="browseServerScriptBtn">
+                                        <i data-lucide="folder-open" class="btn-icon"></i>
+                                        <span>Browse</span>
+                                    </button>
+                                </div>
+                            </label>
+
+                            <div class="field-grid two full">
+                                <label class="field">
+                                    <span>YGO3 Game Directory</span>
+                                    <div class="input-with-actions">
+                                        <input class="mono" id="game_dir" placeholder="Game directory">
+                                        <button type="button" class="button secondary" id="browseGameDirBtn">
+                                            <i data-lucide="folder-open" class="btn-icon"></i>
+                                            <span>Browse</span>
+                                        </button>
+                                    </div>
+                                </label>
+
+                                <label class="field">
+                                    <span>Ocgcore DLL</span>
+                                    <div class="input-with-actions">
+                                        <input class="mono" id="ocg_dll" placeholder="Path to ocgcore.dll">
+                                        <button type="button" class="button secondary" id="browseOcgDllBtn">
+                                            <i data-lucide="folder-open" class="btn-icon"></i>
+                                            <span>Browse</span>
+                                        </button>
+                                    </div>
+                                </label>
+
+                                <label class="field">
+                                    <span>Cards Database (cards.cdb)</span>
+                                    <div class="input-with-actions">
+                                        <input class="mono" id="card_database" placeholder="Path to cards.cdb">
+                                        <button type="button" class="button secondary" id="browseCardDbBtn">
+                                            <i data-lucide="folder-open" class="btn-icon"></i>
+                                            <span>Browse</span>
+                                        </button>
+                                    </div>
+                                </label>
+
+                                <label class="field">
+                                    <span>Script Directory</span>
+                                    <div class="input-with-actions">
+                                        <input class="mono" id="script_dir" placeholder="Script directory">
+                                        <button type="button" class="button secondary" id="browseScriptDirBtn">
+                                            <i data-lucide="folder-open" class="btn-icon"></i>
+                                            <span>Browse</span>
+                                        </button>
+                                    </div>
+                                </label>
+
+                                <label class="field">
+                                    <span>Data Save Directory</span>
+                                    <div class="input-with-actions">
+                                        <input class="mono" id="data_dir" placeholder="Data directory">
+                                        <button type="button" class="button secondary" id="setLocalDataDirBtn"
+                                            title="Create/use folder where GUI runs">
+                                            <i data-lucide="folder-plus" class="btn-icon"></i>
+                                            <span>Same Folder</span>
+                                        </button>
+                                        <button type="button" class="button secondary" id="browseDataDirBtn">
+                                            <i data-lucide="folder-open" class="btn-icon"></i>
+                                            <span>Browse</span>
+                                        </button>
+                                    </div>
+                                </label>
+
+                                <label class="field">
+                                    <span>WWW Save Directory</span>
+                                    <div class="input-with-actions">
+                                        <input class="mono" id="web_dir" placeholder="Web directory">
+                                        <button type="button" class="button secondary" id="setLocalWebDirBtn"
+                                            title="Create/use folder where GUI runs">
+                                            <i data-lucide="folder-plus" class="btn-icon"></i>
+                                            <span>Same Folder</span>
+                                        </button>
+                                        <button type="button" class="button secondary" id="browseWebDirBtn">
+                                            <i data-lucide="folder-open" class="btn-icon"></i>
+                                            <span>Browse</span>
+                                        </button>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title-group">
+                                <i data-lucide="network" class="panel-title-icon"></i>
+                                <h3>Network & Ports</h3>
+                            </div>
+                            <span class="badge">TCP / HTTP</span>
+                        </div>
+
+                        <div class="field-grid two">
+                            <label class="field">
+                                <span>Host Address</span>
+                                <input class="mono" id="host" placeholder="0.0.0.0">
+                            </label>
+
+                            <label class="field">
+                                <span>Front Address</span>
+                                <input class="mono" id="front_address" placeholder="127.0.0.1">
+                            </label>
+
+                            <div class="field-grid four full">
+                                <label class="field">
+                                    <span>Gate Port</span>
+                                    <input class="mono" id="gate_port" type="number" placeholder="7911">
+                                </label>
+
+                                <label class="field">
+                                    <span>Front Port</span>
+                                    <input class="mono" id="front_port" type="number" placeholder="7921">
+                                </label>
+
+                                <label class="field">
+                                    <span>Duel Port</span>
+                                    <input class="mono" id="duel_port" type="number" placeholder="7931">
+                                </label>
+
+                                <label class="field">
+                                    <span>HTTP Port</span>
+                                    <input class="mono" id="http_port" type="number" placeholder="8080">
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- BP MANAGER -->
+                <section class="tab" id="tab-bp">
+                    <header class="page-header">
+                        <div>
+                            <h2>BP Manager</h2>
+                            <p>Inject Battle Points (BP) directly into a player's saved shop balance.</p>
+                        </div>
+                    </header>
+
+                    <div class="panel narrow-panel">
+                        <div class="panel-header">
+                            <div class="panel-title-group">
+                                <i data-lucide="wallet" class="panel-title-icon"></i>
+                                <h3>Grant Shop Balance</h3>
+                            </div>
+                            <span class="badge">uint32 Safe</span>
+                        </div>
+
+                        <div class="field-grid two">
+                            <label class="field">
+                                <span>User ID</span>
+                                <input class="mono" id="user_id" type="number" min="0" value="1001">
+                            </label>
+
+                            <label class="field">
+                                <span>BP Amount to Add</span>
+                                <input class="mono" id="bpAmount" type="number" min="1" placeholder="e.g. 5000">
+                            </label>
+                        </div>
+
+                        <div class="callout-box">
+                            <i data-lucide="shield-alert" class="callout-icon"></i>
+                            <span>Hard safety ceiling: <strong>4,294,967,295 BP</strong> (unsigned 32-bit protocol
+                                limit).</span>
+                        </div>
+
+                        <div class="button-row">
+                            <button class="button primary" id="grantBPButton">
+                                <i data-lucide="plus-circle" class="btn-icon"></i>
+                                <span>Add BP to Account</span>
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- CARD IDS -->
+                <section class="tab" id="tab-cards">
+                    <header class="page-header">
+                        <div>
+                            <h2>YGOPRODeck Card IDs Generator</h2>
+                            <p>Fetch and map card IDs, artwork image IDs, and Konami IDs into a unified JSON file.</p>
+                        </div>
+                    </header>
+
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title-group">
+                                <i data-lucide="database" class="panel-title-icon"></i>
+                                <h3>Output Configuration</h3>
+                            </div>
+                            <span id="cardGenerationStatus" class="status-pill-inline">Ready</span>
+                        </div>
+
+                        <label class="field">
+                            <span>Output JSON Path</span>
+                            <div class="input-with-actions">
+                                <input class="mono" id="card_ids_output" placeholder="Path to card-ids.json">
+                                <button type="button" class="button secondary" id="setLocalCardIdsBtn"
+                                    title="Save card-ids.json in the same folder where GUI runs">
+                                    <i data-lucide="file-plus" class="btn-icon"></i>
+                                    <span>Same Folder</span>
+                                </button>
+                                <button type="button" class="button secondary" id="browseCardIdsOutputBtn">
+                                    <i data-lucide="folder-open" class="btn-icon"></i>
+                                    <span>Browse</span>
+                                </button>
+                            </div>
+                        </label>
+
+                        <div class="button-row">
+                            <button class="button success" id="generateCardsButton">
+                                <i data-lucide="download" class="btn-icon"></i>
+                                <span>Download & Generate JSON</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="panel log-panel">
+                        <div class="log-heading">
+                            <div class="panel-title-group">
+                                <i data-lucide="terminal" class="panel-title-icon"></i>
+                                <h3>Generation Output</h3>
+                            </div>
+                            <button class="button secondary small" id="clearCardLogButton">
+                                <i data-lucide="trash-2" class="btn-icon"></i>
+                                <span>Clear</span>
+                            </button>
+                        </div>
+                        <div id="cardLog" class="console modern-console"></div>
+                    </div>
+                </section>
+
+                <!-- NPC AI -->
+                <section class="tab" id="tab-ai">
+                    <header class="page-header">
+                        <div>
+                            <h2>Local NPC AI / LM Studio</h2>
+                            <p>Connect a local LLM endpoint to drive intelligent NPC duel behavior.</p>
+                        </div>
+                    </header>
+
+                    <div class="panel">
+                        <div class="toggle-card">
+                            <div class="toggle-card-text">
+                                <strong>Enable AI-Controlled NPCs</strong>
+                                <span>Route NPC decision states through LM Studio's local API</span>
+                            </div>
+                            <label class="modern-switch">
+                                <input id="npc_ai_enabled" type="checkbox">
+                                <span class="switch-track"></span>
+                            </label>
+                        </div>
+
+                        <div class="field-grid two">
+                            <label class="field">
+                                <span>LM Studio API URL</span>
+                                <input class="mono" id="lm_studio_url" placeholder="http://localhost:1234/v1">
+                            </label>
+
+                            <label class="field">
+                                <span>Request Timeout (seconds)</span>
+                                <input class="mono" id="npc_ai_timeout" type="number" min="1" value="30">
+                            </label>
+
+                            <label class="field full">
+                                <span>Active Language Model</span>
+                                <div class="input-with-actions">
+                                    <select id="modelSelector">
+                                        <option value="">Click Refresh Models to discover local models</option>
+                                    </select>
+                                    <button type="button" class="button primary" id="modelActionButton">
+                                        <i data-lucide="power" class="btn-icon"></i>
+                                        <span>Load Model</span>
+                                    </button>
+                                    <button type="button" class="button secondary" id="refreshModelsButton">
+                                        <i data-lucide="refresh-cw" class="btn-icon"></i>
+                                        <span>Refresh</span>
+                                    </button>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div class="button-row">
+                            <button class="button secondary" id="testLMButton">
+                                <i data-lucide="activity" class="btn-icon"></i>
+                                <span>Test Connection</span>
+                            </button>
+                            <button class="button secondary" id="saveAIButton">
+                                <i data-lucide="save" class="btn-icon"></i>
+                                <span>Save AI Settings</span>
+                            </button>
+                        </div>
+
+                        <div class="callout-box subtle">
+                            <i data-lucide="info" class="callout-icon"></i>
+                            <span id="aiStatus">AI status: Not tested</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SERVER LOGS -->
+                <section class="tab" id="tab-logs">
+                    <header class="page-header">
+                        <div>
+                            <h2>Server Logs</h2>
+                            <p>Real-time stdout/stderr stream from the YGO3 server process.</p>
+                        </div>
+                        <div class="button-row header-actions">
+                            <button class="button secondary small" id="copyServerLogsButton">
+                                <i data-lucide="copy" class="btn-icon"></i>
+                                <span>Copy</span>
+                            </button>
+                            <button class="button secondary small" id="clearServerLogsButton">
+                                <i data-lucide="trash-2" class="btn-icon"></i>
+                                <span>Clear</span>
+                            </button>
+                        </div>
+                    </header>
+
+                    <div class="panel log-panel fill-panel">
+                        <div class="log-toolbar">
+                            <div class="log-filter-group">
+                                <i data-lucide="search" class="filter-icon"></i>
+                                <input type="text" id="serverLogFilter" placeholder="Filter server logs..."
+                                    class="log-filter-input">
+                            </div>
+
+                            <div class="filter-pills" data-target="serverLog">
+                                <button class="pill active" data-level="all">All</button>
+                                <button class="pill" data-level="info">Info</button>
+                                <button class="pill" data-level="warn">Warn</button>
+                                <button class="pill" data-level="error">Error</button>
+                            </div>
+
+                            <label class="modern-switch compact">
+                                <input type="checkbox" id="serverAutoScroll" checked>
+                                <span class="switch-track"></span>
+                                <span class="toggle-label">Auto-scroll</span>
+                            </label>
+                        </div>
+                        <div id="serverLog" class="console modern-console"></div>
+                    </div>
+                </section>
+
+                <!-- AI LOGS -->
+                <section class="tab" id="tab-aiLogs">
+                    <header class="page-header">
+                        <div>
+                            <h2>LM Studio Logs</h2>
+                            <p>NPC AI inference prompts and responses extracted from server telemetry.</p>
+                        </div>
+                        <div class="button-row header-actions">
+                            <button class="button secondary small" id="copyAILogsButton">
+                                <i data-lucide="copy" class="btn-icon"></i>
+                                <span>Copy</span>
+                            </button>
+                            <button class="button secondary small" id="clearAILogsButton">
+                                <i data-lucide="trash-2" class="btn-icon"></i>
+                                <span>Clear</span>
+                            </button>
+                        </div>
+                    </header>
+
+                    <div class="panel log-panel fill-panel">
+                        <div class="log-toolbar">
+                            <div class="log-filter-group">
+                                <i data-lucide="search" class="filter-icon"></i>
+                                <input type="text" id="aiLogFilter" placeholder="Filter AI logs..."
+                                    class="log-filter-input">
+                            </div>
+
+                            <div class="filter-pills" data-target="aiLog">
+                                <button class="pill active" data-level="all">All</button>
+                                <button class="pill" data-level="info">Info</button>
+                                <button class="pill" data-level="warn">Warn</button>
+                                <button class="pill" data-level="error">Error</button>
+                            </div>
+
+                            <label class="modern-switch compact">
+                                <input type="checkbox" id="aiAutoScroll" checked>
+                                <span class="switch-track"></span>
+                                <span class="toggle-label">Auto-scroll</span>
+                            </label>
+                        </div>
+                        <div id="aiLog" class="console modern-console"></div>
+                    </div>
+                </section>
+
+                <!-- GUI SETTINGS -->
+                <section class="tab" id="tab-gui">
+                    <header class="page-header">
+                        <div>
+                            <h2>GUI Settings</h2>
+                            <p>Customize interface theme, typography, and readability.</p>
+                        </div>
+                    </header>
+
+                    <div class="panel narrow-panel">
+                        <div class="panel-header">
+                            <div class="panel-title-group">
+                                <i data-lucide="sun-moon" class="panel-title-icon"></i>
+                                <h3>Theme & Appearance</h3>
+                            </div>
+                            <span class="badge">Color Mode</span>
+                        </div>
+
+                        <div class="field">
+                            <span>Color Theme</span>
+                            <input type="hidden" id="gui_theme" value="dark">
+                            <div class="segmented-control" id="themeSegmentedControl">
+                                <button type="button" class="segment-btn active" data-theme-val="dark">
+                                    <i data-lucide="moon" class="btn-icon"></i>
+                                    <span>Dark</span>
+                                </button>
+                                <button type="button" class="segment-btn" data-theme-val="light">
+                                    <i data-lucide="sun" class="btn-icon"></i>
+                                    <span>Light</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel narrow-panel">
+                        <div class="panel-header">
+                            <div class="panel-title-group">
+                                <i data-lucide="type" class="panel-title-icon"></i>
+                                <h3>Typography & Interface Scale</h3>
+                            </div>
+                            <span class="badge">Accessibility</span>
+                        </div>
+
+                        <div class="field-grid two">
+                            <label class="field">
+                                <span>Interface Font Family</span>
+                                <select id="gui_font_family">
+                                    <option value="Inter">Inter (Default Clean UI)</option>
+                                    <option value="Plus Jakarta Sans">Plus Jakarta Sans (Geometric)</option>
+                                    <option value="System UI">System Native (Segoe UI / SF Pro)</option>
+                                    <option value="JetBrains Mono">JetBrains Mono (Technical Monospace)</option>
+                                </select>
+                            </label>
+
+                            <div class="field">
+                                <span>Base Font Size (12px – 18px)</span>
+                                <div class="font-size-control">
+                                    <button type="button" class="button secondary small icon-only" id="decreaseFontBtn"
+                                        title="Decrease Font Size">
+                                        <i data-lucide="minus" class="btn-icon"></i>
+                                    </button>
+                                    <input type="range" id="gui_font_size" min="12" max="18" step="1" value="14">
+                                    <button type="button" class="button secondary small icon-only" id="increaseFontBtn"
+                                        title="Increase Font Size">
+                                        <i data-lucide="plus" class="btn-icon"></i>
+                                    </button>
+                                    <span class="size-pill" id="fontSizeValueLabel">14px</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="button-row">
+                            <button type="button" class="button primary" id="saveGuiSettingsButton">
+                                <i data-lucide="save" class="btn-icon"></i>
+                                <span>Save GUI Settings to JSON</span>
+                            </button>
+                            <button type="button" class="button secondary" id="resetGuiSettingsButton">
+                                <i data-lucide="rotate-ccw" class="btn-icon"></i>
+                                <span>Reset Defaults</span>
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+            </main>
+        </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script>
+        "use strict";
+
+        const CONFIG_FIELDS = [
+            "server_script",
+            "python_executable",
+            "game_dir",
+            "ocg_dll",
+            "card_database",
+            "script_dir",
+            "data_dir",
+            "web_dir",
+            "card_ids_output",
+            "host",
+            "front_address",
+            "gate_port",
+            "front_port",
+            "duel_port",
+            "http_port",
+            "user_id",
+            "npc_ai_enabled",
+            "lm_studio_url",
+            "lm_studio_model",
+            "npc_ai_timeout",
+            "gui_theme",
+            "gui_font_family",
+            "gui_font_size"
+        ];
+
+        const FONT_MAP = {
+            "Inter": "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+            "Plus Jakarta Sans": "'Plus Jakarta Sans', 'Inter', sans-serif",
+            "System UI": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            "JetBrains Mono": "'JetBrains Mono', Consolas, monospace"
+        };
+
+        const MAX_LOG_LINES = 1500;
+
+        let serverRunning = false;
+        let availableModels = [];
+        let loadedModels = {};
+        let cardGenerationRunning = false;
+
+        const activeLevelFilters = {
+            serverLog: "all",
+            aiLog: "all"
+        };
+
+        const byId = (id) => document.getElementById(id);
+        const value = (id) => byId(id)?.value.trim() ?? "";
+        const setValue = (id, val) => {
+            const el = byId(id);
+            if (el) el.value = val ?? "";
+        };
+
+        function debounce(fn, delay = 150) {
+            let timer;
+            return (...args) => {
+                clearTimeout(timer);
+                timer = setTimeout(() => fn(...args), delay);
+            };
+        }
+
+        function resolveEffectiveTheme(themePref) {
+            if (themePref === "system") {
+                return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+                    ? "light"
+                    : "dark";
+            }
+            return themePref === "light" ? "light" : "dark";
+        }
+
+        function applyGuiPreferences({ theme, fontFamily, fontSize } = {}) {
+            const selectedTheme = theme || value("gui_theme") || "dark";
+            const selectedFont = fontFamily || value("gui_font_family") || "Inter";
+            const parsedSize = Math.min(18, Math.max(12, parseInt(fontSize || value("gui_font_size") || "14", 10) || 14));
+
+            setValue("gui_theme", selectedTheme);
+            document.querySelectorAll("#themeSegmentedControl .segment-btn").forEach(btn => {
+                btn.classList.toggle("active", btn.dataset.themeVal === selectedTheme);
+            });
+
+            const effectiveTheme = resolveEffectiveTheme(selectedTheme);
+            document.documentElement.setAttribute("data-theme", effectiveTheme);
+
+            const resolvedFontStack = FONT_MAP[selectedFont] || FONT_MAP["Inter"];
+            setValue("gui_font_family", FONT_MAP[selectedFont] ? selectedFont : "Inter");
+            document.documentElement.style.setProperty("--font-sans", resolvedFontStack);
+
+            setValue("gui_font_size", String(parsedSize));
+            document.documentElement.style.setProperty("--base-font-size", `${parsedSize}px`);
+
+            if (byId("fontSizeValueLabel")) {
+                byId("fontSizeValueLabel").textContent = `${parsedSize}px`;
+            }
+        }
+
+        function syncTelemetryOverview() {
+            const hostVal = value("host") || "0.0.0.0";
+            const frontAddr = value("front_address") || "127.0.0.1";
+            const gate = value("gate_port") || "7911";
+            const front = value("front_port") || "7921";
+            const duel = value("duel_port") || "7931";
+            const http = value("http_port") || "8080";
+            const uid = value("user_id") || "1001";
+            const aiOn = byId("npc_ai_enabled")?.checked ?? false;
+            const selectedModel = value("modelSelector") || value("lm_studio_model") || "No active model";
+
+            if (byId("chipHost")) byId("chipHost").textContent = hostVal;
+            if (byId("chipPorts")) byId("chipPorts").textContent = `${gate} / ${front} / ${duel}`;
+            if (byId("chipHttp")) byId("chipHttp").textContent = http;
+            if (byId("chipAiState")) byId("chipAiState").textContent = aiOn ? "Enabled" : "Disabled";
+
+            if (byId("kpiTcpPorts")) byId("kpiTcpPorts").textContent = `${gate} · ${duel}`;
+            if (byId("kpiFrontAddr")) byId("kpiFrontAddr").textContent = `Front: ${frontAddr}:${front}`;
+            if (byId("kpiAiMode")) byId("kpiAiMode").textContent = aiOn ? "ENABLED" : "DISABLED";
+            if (byId("kpiAiModel")) byId("kpiAiModel").textContent = selectedModel;
+            if (byId("kpiTargetUid")) byId("kpiTargetUid").textContent = uid;
+        }
+
+        function showToast(message, type = "info") {
+            const toast = byId("toast");
+            if (!toast) return;
+
+            toast.textContent = message;
+            toast.className = `toast show ${type}`;
+
+            window.clearTimeout(showToast.timer);
+            showToast.timer = window.setTimeout(() => {
+                toast.className = "toast";
+            }, 3500);
+        }
+
+        function detectLogLevel(message) {
+            const lower = message.toLowerCase();
+            if (lower.includes("error") || lower.includes("fail") || lower.includes("exception") || lower.includes("traceback")) {
+                return "error";
+            }
+            if (lower.includes("warn") || lower.includes("caution")) {
+                return "warn";
+            }
+            if (lower.includes("success") || lower.includes("started") || lower.includes("connected") || lower.includes("ready")) {
+                return "success";
+            }
+            return "info";
+        }
+
+        function lineMatchesFilters(lineEl, consoleId) {
+            const filterInputId = consoleId === "serverLog" ? "serverLogFilter" : "aiLogFilter";
+            const searchQuery = byId(filterInputId)?.value.toLowerCase() || "";
+            const levelFilter = activeLevelFilters[consoleId] || "all";
+
+            const text = lineEl.querySelector(".log-text")?.textContent.toLowerCase() || "";
+            const lineLevel = lineEl.dataset.level || "info";
+
+            const matchesText = !searchQuery || text.includes(searchQuery);
+            const matchesLevel = levelFilter === "all" || lineLevel === levelFilter;
+
+            return matchesText && matchesLevel;
+        }
+
+        function appendLog(id, message) {
+            const target = byId(id);
+            if (!target) return;
+
+            const time = new Date().toLocaleTimeString([], { hour12: false });
+            const stringMessage = String(message);
+            const levelClass = detectLogLevel(stringMessage);
+
+            const line = document.createElement("div");
+            line.className = `log-line ${levelClass}`;
+            line.dataset.level = levelClass;
+
+            const timeSpan = document.createElement("span");
+            timeSpan.className = "log-time";
+            timeSpan.textContent = time;
+
+            const textSpan = document.createElement("span");
+            textSpan.className = "log-text";
+            textSpan.textContent = stringMessage;
+
+            line.append(timeSpan, textSpan);
+
+            if (!lineMatchesFilters(line, id)) {
+                line.style.display = "none";
+            }
+
+            target.appendChild(line);
+
+            while (target.children.length > MAX_LOG_LINES) {
+                target.removeChild(target.firstChild);
+            }
+
+            const autoScrollId = id === "serverLog" ? "serverAutoScroll" : "aiAutoScroll";
+            const autoScrollEnabled = byId(autoScrollId)?.checked ?? true;
+            if (autoScrollEnabled) {
+                target.scrollTop = target.scrollHeight;
+            }
+        }
+
+        function clearLog(id) {
+            const target = byId(id);
+            if (target) target.innerHTML = "";
+        }
+
+        eel.expose(on_server_log);
+        function on_server_log(message) { appendLog("serverLog", message); }
+
+        eel.expose(on_ai_log);
+        function on_ai_log(message) {
+            eel.annotate_ai_text(String(message))()
+                .then(result => appendLog("aiLog", result))
+                .catch(() => appendLog("aiLog", message));
+        }
+
+        eel.expose(on_card_log);
+        function on_card_log(message) { appendLog("cardLog", message); }
+
+        eel.expose(on_server_status);
+        function on_server_status(running, message) {
+            updateServerStatus(running, message);
+        }
+
+        eel.expose(on_card_generation_finished);
+        function on_card_generation_finished(success, error, outputPath) {
+            cardGenerationRunning = false;
+            byId("generateCardsButton").disabled = false;
+            byId("cardGenerationStatus").textContent = success ? "Completed" : "Failed";
+
+            if (success) {
+                showToast(`Card IDs saved to ${outputPath}`, "success");
+            } else {
+                showToast(error || "Card generation failed.", "error");
+            }
+        }
+
+        eel.expose(on_clear_server_logs);
+        function on_clear_server_logs() { clearLog("serverLog"); }
+
+        eel.expose(on_clear_ai_logs);
+        function on_clear_ai_logs() { clearLog("aiLog"); }
+
+        function showTab(name) {
+            document.querySelectorAll(".tab").forEach(tab => tab.classList.remove("active"));
+            document.querySelectorAll(".nav-button").forEach(btn => btn.classList.remove("active"));
+            byId(`tab-${name}`)?.classList.add("active");
+            document.querySelector(`.nav-button[data-tab="${name}"]`)?.classList.add("active");
+            byId("sidebar")?.classList.remove("open");
+        }
+
+        document.querySelectorAll(".nav-button").forEach(button => {
+            button.addEventListener("click", () => showTab(button.dataset.tab));
+        });
+
+        byId("mobileMenuBtn")?.addEventListener("click", () => {
+            byId("sidebar")?.classList.toggle("open");
+        });
+
+        function updateServerStatus(running, message = "") {
+            serverRunning = Boolean(running);
+            const kpiEngine = byId("kpiEngineStatus");
+            const label = running ? "ONLINE" : "STOPPED";
+
+            if (kpiEngine) {
+                kpiEngine.textContent = label;
+                kpiEngine.style.color = running ? "var(--success)" : "var(--text-heading)";
+            }
+
+            byId("startServerButton").disabled = running;
+            byId("stopServerButton").disabled = !running;
+
+            if (message) showToast(message, running ? "success" : "info");
+        }
+
+        async function refreshServerStatus() {
+            try {
+                const result = await eel.get_server_status()();
+                updateServerStatus(result.running);
+            } catch (error) {
+                console.error(error);
+            }
+        }
+
+        async function loadSettings() {
+            try {
+                const config = await eel.get_config()();
+                CONFIG_FIELDS.forEach(key => {
+                    const element = byId(key);
+                    if (!element) return;
+                    if (key === "npc_ai_enabled") {
+                        element.checked = /^(true|1|yes|on)$/i.test(String(config[key]));
+                    } else if (config[key] !== undefined && config[key] !== null && config[key] !== "") {
+                        setValue(key, config[key]);
+                    }
+                });
+
+                applyGuiPreferences({
+                    theme: config.gui_theme || "dark",
+                    fontFamily: config.gui_font_family || "Inter",
+                    fontSize: config.gui_font_size || "14"
+                });
+
+                syncTelemetryOverview();
+            } catch (error) {
+                applyGuiPreferences();
+                showToast(`Could not load settings: ${error}`, "error");
+            }
+        }
+
+        function collectSettings() {
+            const settings = {};
+            CONFIG_FIELDS.forEach(key => {
+                const element = byId(key);
+                if (!element) return;
+                settings[key] = key === "npc_ai_enabled" ? String(element.checked) : element.value.trim();
+            });
+            return settings;
+        }
+
+        async function saveSettings(customToast = "Settings saved to ygo3_launcher_config.json.") {
+            try {
+                const result = await eel.save_config(collectSettings())();
+                if (!result.success) throw new Error(result.error);
+                syncTelemetryOverview();
+                showToast(customToast, "success");
+            } catch (error) {
+                showToast(`Could not save settings: ${error}`, "error");
+            }
+        }
+
+        async function findPython() {
+            const btn = byId("findPythonButton");
+            btn.disabled = true;
+            try {
+                const result = await eel.find_32bit_python()();
+                if (!result.success) throw new Error(result.error);
+                setValue("python_executable", result.selected);
+                showToast(`Found 32-bit Python: ${result.selected}`, "success");
+            } catch (error) {
+                showToast(error.message || String(error), "error");
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function checkPython() {
+            try {
+                const result = await eel.check_python()();
+                if (!result.success) throw new Error(result.error);
+                showToast(`Python ${result.version} verified. 32-bit / Blowfish OK.`, "success");
+            } catch (error) {
+                showToast(error.message || String(error), "error");
+            }
+        }
+
+        async function startServer() {
+            await saveSettings();
+            byId("startServerButton").disabled = true;
+            try {
+                const result = await eel.start_server()();
+                if (!result.success) throw new Error(result.error);
+                updateServerStatus(true, "Server started.");
+                showTab("logs");
+            } catch (error) {
+                updateServerStatus(false);
+                showToast(error.message || String(error), "error");
+            } finally {
+                byId("startServerButton").disabled = serverRunning;
+            }
+        }
+
+        async function stopServer() {
+            byId("stopServerButton").disabled = true;
+            try {
+                const result = await eel.stop_server()();
+                if (!result.success) throw new Error(result.error);
+                updateServerStatus(false, "Server stopped.");
+            } catch (error) {
+                showToast(error.message || String(error), "error");
+            } finally {
+                byId("stopServerButton").disabled = !serverRunning;
+            }
+        }
+
+        async function grantBP() {
+            const amount = value("bpAmount");
+            const userId = value("user_id");
+            if (!amount || !userId) {
+                showToast("Enter both a User ID and BP amount.", "error");
+                return;
+            }
+            try {
+                const result = await eel.grant_bp(amount, userId)();
+                if (!result.success) throw new Error(result.error);
+                showToast(result.message, "success");
+                setValue("bpAmount", "");
+            } catch (error) {
+                showToast(error.message || String(error), "error");
+            } finally {
+                await refreshServerStatus();
+            }
+        }
+
+        async function generateCardIds() {
+            if (cardGenerationRunning) return;
+            const output = value("card_ids_output");
+            if (!output) {
+                showToast("Specify an output JSON file path first.", "error");
+                return;
+            }
+            cardGenerationRunning = true;
+            byId("generateCardsButton").disabled = true;
+            byId("cardGenerationStatus").textContent = "Generating...";
+            try {
+                const result = await eel.generate_card_ids(output)();
+                if (!result.success) throw new Error(result.error);
+                showToast("Card ID generation started.", "success");
+            } catch (error) {
+                cardGenerationRunning = false;
+                byId("generateCardsButton").disabled = false;
+                byId("cardGenerationStatus").textContent = "Failed";
+                showToast(error.message || String(error), "error");
+            }
+        }
+
+        function updateModelButton() {
+            const selected = value("modelSelector");
+            const btn = byId("modelActionButton");
+            const labelSpan = btn?.querySelector("span");
+            syncTelemetryOverview();
+            if (!labelSpan) return;
+
+            if (selected && loadedModels[selected]?.length) {
+                labelSpan.textContent = "Unload Model";
+                btn.className = "button danger";
+            } else if (Object.keys(loadedModels).length) {
+                labelSpan.textContent = "Switch Model";
+                btn.className = "button primary";
+            } else {
+                labelSpan.textContent = "Load Model";
+                btn.className = "button primary";
+            }
+        }
+
+        async function refreshModels() {
+            const refreshBtn = byId("refreshModelsButton");
+            refreshBtn.disabled = true;
+            byId("aiStatus").textContent = "AI status: Connecting to LM Studio...";
+            try {
+                await eel.save_config(collectSettings())();
+                const result = await eel.test_lm_studio()();
+                if (!result.success) throw new Error(result.error);
+
+                availableModels = result.models || [];
+                loadedModels = result.loaded || {};
+
+                const selector = byId("modelSelector");
+                selector.innerHTML = "";
+                availableModels.forEach(model => {
+                    const option = document.createElement("option");
+                    option.value = model;
+                    option.textContent = model;
+                    selector.appendChild(option);
+                });
+
+                selector.value = result.selected || availableModels[0] || "";
+                updateModelButton();
+
+                byId("aiStatus").textContent = `AI status: Connected (${availableModels.length} models available) • Selected: ${selector.value || "None"}`;
+                showToast("LM Studio connected.", "success");
+            } catch (error) {
+                byId("aiStatus").textContent = `AI status: Connection failed — ${error.message || error}`;
+                showToast(error.message || String(error), "error");
+            } finally {
+                refreshBtn.disabled = false;
+            }
+        }
+
+        async function toggleModel() {
+            const selected = value("modelSelector");
+            if (!selected) {
+                showToast("Refresh Models and select a model first.", "error");
+                return;
+            }
+
+            const actionBtn = byId("modelActionButton");
+            const refreshBtn = byId("refreshModelsButton");
+            actionBtn.disabled = true;
+            refreshBtn.disabled = true;
+            byId("aiStatus").textContent = `AI status: Working with ${selected}...`;
+
+            try {
+                await saveAISettings();
+                const result = await eel.toggle_model(selected)();
+                if (!result.success) throw new Error(result.error);
+
+                loadedModels = result.loaded || {};
+                byId("aiStatus").textContent = result.action === "loaded" ? `AI status: Model loaded (${selected})` : `AI status: Model unloaded (${selected})`;
+                updateModelButton();
+                showToast(result.action === "loaded" ? "Model loaded." : "Model unloaded.", "success");
+            } catch (error) {
+                byId("aiStatus").textContent = `AI status: Operation failed — ${error.message || error}`;
+                showToast(error.message || String(error), "error");
+            } finally {
+                actionBtn.disabled = false;
+                refreshBtn.disabled = false;
+            }
+        }
+
+        async function saveAISettings() {
+            const enabled = byId("npc_ai_enabled").checked;
+            const url = value("lm_studio_url");
+            const model = value("modelSelector");
+            const timeout = value("npc_ai_timeout");
+
+            const result = await eel.save_ai_settings(enabled, url, model, timeout)();
+            if (!result.success) throw new Error(result.error);
+            syncTelemetryOverview();
+            return result;
+        }
+
+        async function testLMStudio() {
+            try {
+                await saveAISettings();
+                await refreshModels();
+            } catch (error) {
+                showToast(error.message || String(error), "error");
+            }
+        }
+
+        function applyLogFilters(consoleId) {
+            const consoleEl = byId(consoleId);
+            if (!consoleEl) return;
+            const lines = consoleEl.getElementsByClassName("log-line");
+            Array.from(lines).forEach(line => {
+                line.style.display = lineMatchesFilters(line, consoleId) ? "grid" : "none";
+            });
+        }
+
+        function copyLogs(consoleId) {
+            const consoleEl = byId(consoleId);
+            if (!consoleEl) return;
+            const text = Array.from(consoleEl.getElementsByClassName("log-line"))
+                .filter(line => line.style.display !== "none")
+                .map(line => `${line.querySelector(".log-time")?.textContent || ""} ${line.querySelector(".log-text")?.textContent || ""}`.trim())
+                .join("\n");
+
+            navigator.clipboard.writeText(text)
+                .then(() => showToast("Visible logs copied to clipboard.", "success"))
+                .catch(() => showToast("Failed to copy logs.", "error"));
+        }
+
+        // Native Dialog Browse Handlers
+        async function handleBrowseFile(fieldId, title, filetypes) {
+            const path = await eel.browse_file(title, filetypes)();
+            if (path) setValue(fieldId, path);
+        }
+
+        async function handleBrowseSaveFile(fieldId, title, filetypes, ext) {
+            const path = await eel.browse_save_file(title, filetypes, ext)();
+            if (path) setValue(fieldId, path);
+        }
+
+        async function handleBrowseDir(fieldId, title) {
+            const path = await eel.browse_directory(title)();
+            if (path) setValue(fieldId, path);
+        }
+
+// Local Folder Quick-Set Handler (Creates data & www folders)
+        async function handleSetLocalDir(fieldId, folderName) {
+            try {
+                const result = await eel.get_local_runtime_path(folderName)();
+                if (result && result.path) {
+                    setValue(fieldId, result.path);
+                    showToast(`Created and set ${folderName} directory.`, "success");
+                }
+            } catch (error) {
+                setValue(fieldId, `./${folderName}`);
+                showToast(`Set ${folderName} path locally.`, "success");
+            }
+        }
+
+        // Local File Quick-Set Handler (Non-creating for server script and card-ids.json)
+        async function handleSetLocalFile(fieldId, fileName, createIfMissing = false) {
+            try {
+                const result = await eel.get_local_runtime_file_path(fileName, createIfMissing)();
+                if (result && result.path) {
+                    setValue(fieldId, result.path);
+                    showToast(`Set path to ${fileName}.`, "success");
+                }
+            } catch (error) {
+                setValue(fieldId, `./${fileName}`);
+                showToast(`Set path to ./${fileName}.`, "success");
+            }
+        }
+
+        // Clean, non-duplicate event listener bindings
+        byId("setLocalServerScriptBtn")?.addEventListener("click", () => handleSetLocalFile("server_script", "ygo3_server.py", false));
+        byId("setLocalCardIdsBtn")?.addEventListener("click", () => handleSetLocalFile("card_ids_output", "card-ids.json", false));
+        byId("setLocalDataDirBtn")?.addEventListener("click", () => handleSetLocalDir("data_dir", "data"));
+        byId("setLocalWebDirBtn")?.addEventListener("click", () => handleSetLocalDir("web_dir", "www"));
+
+        // Native Dialog Browse Handlers
+        byId("browsePythonBtn")?.addEventListener("click", () => handleBrowseFile("python_executable", "Select Python Executable", [["Python Executable", "*.exe"], ["All files", "*.*"]]));
+        byId("browseServerScriptBtn")?.addEventListener("click", () => handleBrowseFile("server_script", "Select Server Script", [["Python Script", "*.py"], ["All files", "*.*"]]));
+        byId("browseGameDirBtn")?.addEventListener("click", () => handleBrowseDir("game_dir", "Select Game Directory"));
+        byId("browseOcgDllBtn")?.addEventListener("click", () => handleBrowseFile("ocg_dll", "Select Ocgcore DLL", [["DLL Files", "*.dll"], ["All files", "*.*"]]));
+        byId("browseCardDbBtn")?.addEventListener("click", () => handleBrowseFile("card_database", "Select Card Database", [["CDB Database", "*.cdb"], ["All files", "*.*"]]));
+        byId("browseScriptDirBtn")?.addEventListener("click", () => handleBrowseDir("script_dir", "Select Script Directory"));
+        byId("browseDataDirBtn")?.addEventListener("click", () => handleBrowseDir("data_dir", "Select Data Directory"));
+        byId("browseWebDirBtn")?.addEventListener("click", () => handleBrowseDir("web_dir", "Select Web Directory"));
+        byId("browseCardIdsOutputBtn")?.addEventListener("click", () => handleBrowseSaveFile("card_ids_output", "Save Card IDs JSON As", [["JSON Files", "*.json"], ["All files", "*.*"]], ".json"));
+        // Configuration Import Handlers
+        byId("importConfigButton")?.addEventListener("click", () => {
+            byId("importConfigFileInput")?.click();
+        });
+
+        byId("importConfigFileInput")?.addEventListener("change", async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const result = await eel.import_launcher_config(text)();
+                if (!result.success) throw new Error(result.error);
+
+                await loadSettings();
+                showToast("Configuration successfully imported.", "success");
+            } catch (err) {
+                showToast(`Import failed: ${err.message || err}`, "error");
+            } finally {
+                e.target.value = "";
+            }
+        });
+
+        byId("saveSettingsButton")?.addEventListener("click", () => saveSettings());
+        byId("startServerButton")?.addEventListener("click", startServer);
+        byId("stopServerButton")?.addEventListener("click", stopServer);
+        byId("findPythonButton")?.addEventListener("click", findPython);
+        byId("checkPythonButton")?.addEventListener("click", checkPython);
+        byId("grantBPButton")?.addEventListener("click", grantBP);
+        byId("generateCardsButton")?.addEventListener("click", generateCardIds);
+
+        byId("refreshModelsButton")?.addEventListener("click", refreshModels);
+        byId("modelActionButton")?.addEventListener("click", toggleModel);
+        byId("testLMButton")?.addEventListener("click", testLMStudio);
+        byId("saveAIButton")?.addEventListener("click", async () => {
+            try {
+                await saveAISettings();
+                showToast("AI settings saved.", "success");
+            } catch (error) {
+                showToast(error.message || String(error), "error");
+            }
+        });
+
+        byId("modelSelector")?.addEventListener("change", updateModelButton);
+
+        ["host", "front_address", "gate_port", "front_port", "duel_port", "http_port", "user_id", "npc_ai_enabled"].forEach(id => {
+            byId(id)?.addEventListener("input", syncTelemetryOverview);
+            byId(id)?.addEventListener("change", syncTelemetryOverview);
+        });
+
+        document.querySelectorAll("#themeSegmentedControl .segment-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                applyGuiPreferences({ theme: btn.dataset.themeVal });
+            });
+        });
+
+        byId("gui_font_family")?.addEventListener("change", () => applyGuiPreferences());
+        byId("gui_font_size")?.addEventListener("input", () => applyGuiPreferences());
+
+        byId("decreaseFontBtn")?.addEventListener("click", () => {
+            const current = parseInt(value("gui_font_size") || "14", 10);
+            applyGuiPreferences({ fontSize: Math.max(12, current - 1) });
+        });
+
+        byId("increaseFontBtn")?.addEventListener("click", () => {
+            const current = parseInt(value("gui_font_size") || "14", 10);
+            applyGuiPreferences({ fontSize: Math.min(18, current + 1) });
+        });
+
+        byId("saveGuiSettingsButton")?.addEventListener("click", () => {
+            saveSettings("GUI preferences saved to ygo3_launcher_config.json.");
+        });
+
+        byId("resetGuiSettingsButton")?.addEventListener("click", async () => {
+            applyGuiPreferences({ theme: "dark", fontFamily: "Inter", fontSize: 14 });
+            await saveSettings("GUI preferences reset to defaults and saved.");
+        });
+
+        byId("clearServerLogsButton")?.addEventListener("click", async () => {
+            clearLog("serverLog");
+            await eel.clear_server_logs()();
+        });
+
+        byId("clearAILogsButton")?.addEventListener("click", async () => {
+            clearLog("aiLog");
+            await eel.clear_ai_logs()();
+        });
+
+        byId("clearCardLogButton")?.addEventListener("click", () => {
+            clearLog("cardLog");
+        });
+
+        byId("serverLogFilter")?.addEventListener("input", debounce(() => applyLogFilters("serverLog"), 120));
+        byId("aiLogFilter")?.addEventListener("input", debounce(() => applyLogFilters("aiLog"), 120));
+
+        document.querySelectorAll(".filter-pills").forEach(group => {
+            const targetConsole = group.dataset.target;
+            group.querySelectorAll(".pill").forEach(pill => {
+                pill.addEventListener("click", () => {
+                    group.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+                    pill.classList.add("active");
+                    activeLevelFilters[targetConsole] = pill.dataset.level;
+                    applyLogFilters(targetConsole);
+                });
+            });
+        });
+
+        byId("copyServerLogsButton")?.addEventListener("click", () => copyLogs("serverLog"));
+        byId("copyAILogsButton")?.addEventListener("click", () => copyLogs("aiLog"));
+
+        window.addEventListener("keydown", (e) => {
+            if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r")) {
+                e.preventDefault();
+                return;
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+                e.preventDefault();
+                saveSettings();
+            }
+        });
+
+        window.addEventListener("DOMContentLoaded", async () => {
+            if (typeof lucide !== "undefined") {
+                lucide.createIcons();
+            }
+            await loadSettings();
+            await refreshServerStatus();
+            byId("stopServerButton").disabled = !serverRunning;
+            window.setInterval(refreshServerStatus, 3000);
+        });
+    </script>
+
+    <script>
+        document.addEventListener("contextmenu", function (e) {
+            e.preventDefault();
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (
+                e.key === "F12" ||
+                (e.ctrlKey && e.key.toLowerCase() === "u") ||
+                (e.ctrlKey && e.shiftKey && ["i", "j", "c"].includes(e.key.toLowerCase()))
+            ) {
+                e.preventDefault();
+            }
+        });
+    </script>
+</body>
+
+</html>
