@@ -74,7 +74,7 @@ The goal is to investigate the original game's network communication, understand
 
 ## Game Download
 
-The original installer is available on the My Abandonware:
+The original installer is available on My Abandonware:
 
 **[Download Yu-Gi-Oh! ONLINE 3 (2010) - v1.153](https://www.myabandonware.com/game/yu-gi-oh-online-3-duel-accelerator-qy4)**
 
