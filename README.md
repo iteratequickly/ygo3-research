@@ -559,7 +559,6 @@ Extracting resources alone does **not** create a playable recreation of the game
 
 | Issue | Description |
 |---|---|
-| Eagle selection crash | Selecting Eagle causes the client to crash |
 | Special Packs | Not visible in the shop |
 
 These issues remain outstanding and require further investigation.
