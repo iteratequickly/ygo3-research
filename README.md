@@ -74,12 +74,12 @@ The goal is to investigate the original game's network communication, understand
 
 ## Game Download
 
-The original installer is available on the Internet Archive:
+The original installer is available on the My Abandonware:
 
-**[Download Yu-Gi-Oh! ONLINE 3 (2010)](https://archive.org/details/yo3setup_20100709en)**
+**[Download Yu-Gi-Oh! ONLINE 3 (2010) - v1.153](https://www.myabandonware.com/game/yu-gi-oh-online-3-duel-accelerator-qy4)**
 
 > [!NOTE]
-> The download is hosted by the Internet Archive, not by this project. Always verify downloaded files and keep a backup of your original game installation.
+> The download is hosted by My Abandonware, not by this project. Always verify downloaded files and keep a backup of your original game installation.
 
 ---
 
