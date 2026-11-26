@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 
 <head>
     <meta charset="UTF-8">
@@ -11,13 +11,11 @@
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap');
 
         :root {
-            /* Dynamic GUI Preferences */
             --base-font-size: 14px;
             --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             --font-display: 'Space Grotesk', 'Inter', sans-serif;
             --font-mono: 'JetBrains Mono', Consolas, monospace;
 
-            /* Radii */
             --radius-xs: 6px;
             --radius-sm: 9px;
             --radius-md: 12px;
@@ -215,6 +213,10 @@
             opacity: 0.45;
         }
 
+        .hidden {
+            display: none !important;
+        }
+
         /* ============================================================
            CSS GRID APPLICATION SHELL
         ============================================================ */
@@ -231,7 +233,6 @@
             display: none;
         }
 
-        /* SIDEBAR GRID */
         .sidebar {
             grid-area: sidebar;
             display: grid;
@@ -291,7 +292,6 @@
             border: 1px solid var(--border);
         }
 
-        /* NAVIGATION */
         .nav-groups {
             display: grid;
             align-content: start;
@@ -369,7 +369,6 @@
             color: var(--accent);
         }
 
-        /* SIDEBAR FOOTER */
         .sidebar-footer {
             display: grid;
             gap: 10px;
@@ -410,9 +409,6 @@
             color: var(--accent);
         }
 
-        /* ============================================================
-           MAIN WORKSPACE GRID
-        ============================================================ */
         .content-area {
             grid-area: workspace;
             display: grid;
@@ -421,7 +417,6 @@
             overflow: hidden;
         }
 
-        /* TOP TELEMETRY BAR */
         .topbar {
             display: grid;
             grid-template-columns: minmax(0, 1fr) auto;
@@ -514,7 +509,6 @@
             }
         }
 
-        /* PAGE HEADER */
         .page-header {
             display: grid;
             grid-template-columns: minmax(0, 1fr) auto;
@@ -539,7 +533,6 @@
             font-size: 0.95rem;
         }
 
-        /* BENTO KPI GRID */
         .kpi-grid {
             display: grid;
             grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -593,7 +586,6 @@
             color: var(--muted);
         }
 
-        /* PANELS */
         .panel {
             display: grid;
             grid-auto-rows: max-content;
@@ -677,7 +669,6 @@
             margin: 0;
         }
 
-        /* CALLOUT BOXES */
         .callout-box {
             display: grid;
             grid-template-columns: 16px minmax(0, 1fr);
@@ -705,7 +696,6 @@
             height: 16px;
         }
 
-        /* FORMS & INPUTS */
         .field-grid {
             display: grid;
             grid-template-columns: minmax(0, 1fr);
@@ -716,13 +706,21 @@
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
+        .field-grid.three {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
         .field-grid.four {
             grid-template-columns: repeat(4, minmax(0, 1fr));
         }
 
+        .field-grid.five {
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+        }
+
         .field {
             display: grid;
-            grid-template-rows: auto 1fr;
+            grid-template-rows: auto auto;
             gap: 7px;
             min-width: 0;
         }
@@ -748,6 +746,7 @@
 
         .field input[type="text"],
         .field input[type="number"],
+        .field input[type="search"],
         .field input:not([type]),
         .field select {
             width: 100%;
@@ -790,7 +789,6 @@
             color: var(--text);
         }
 
-        /* SEGMENTED THEME PICKER & FONT SIZE CONTROLS */
         .segmented-control {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -860,7 +858,6 @@
             text-align: center;
         }
 
-        /* MODERN TOGGLE SWITCH */
         .toggle-card {
             display: grid;
             grid-template-columns: minmax(0, 1fr) auto;
@@ -958,7 +955,6 @@
             color: var(--text-secondary);
         }
 
-        /* BUTTONS */
         .button-row {
             display: grid;
             grid-auto-flow: column;
@@ -1068,7 +1064,6 @@
             width: 100%;
         }
 
-        /* LOGS & CONSOLE GRID */
         .log-panel {
             display: grid;
             grid-template-rows: auto minmax(0, 1fr);
@@ -1132,7 +1127,6 @@
             border-color: var(--accent);
         }
 
-        /* SEVERITY FILTER PILLS */
         .filter-pills {
             display: grid;
             grid-auto-flow: column;
@@ -1227,7 +1221,6 @@
             color: var(--log-info);
         }
 
-        /* TOAST NOTIFICATIONS */
         .toast {
             position: fixed;
             right: 24px;
@@ -1263,21 +1256,406 @@
             border-left-color: var(--danger);
         }
 
+        /* ADMIN TOOLS */
+        .admin-banner {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 11px 15px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: var(--surface-deep);
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .admin-banner .dot {
+            flex: none;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+
+        .admin-banner.live {
+            color: var(--text);
+        }
+
+        .admin-banner.live .dot {
+            background: var(--success);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+        }
+
+        .admin-sub {
+            margin: 24px 0 8px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+
+        .admin-table-wrap,
+        .table-wrap {
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+        }
+
+        .admin-table,
+        .feature-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        .admin-table th,
+        .admin-table td,
+        .feature-table th,
+        .feature-table td {
+            padding: 9px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .admin-table th,
+        .feature-table th {
+            background: var(--surface-deep);
+            color: var(--text-secondary);
+            font-size: 0.76rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .admin-table tr:last-child td,
+        .feature-table tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .admin-table td.mono {
+            font-family: var(--font-mono);
+            font-size: 0.86rem;
+        }
+
+        .admin-table td.actions {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .admin-table td.actions .button {
+            margin-left: 6px;
+        }
+
+        .admin-empty,
+        .empty-state {
+            padding: 18px 14px;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .admin-note {
+            margin: 14px 0 0;
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            line-height: 1.55;
+        }
+
+        /* COMMUNITY VIEWS (PLAYERS / TEAMS / REPLAYS / PACKS) */
+        .feature-toolbar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .feature-toolbar input[type="search"] {
+            flex: 1;
+            min-width: 180px;
+            height: 2.5rem;
+            padding: 0 12px;
+            color: var(--text);
+            background: var(--surface-deep);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            outline: none;
+        }
+
+        .feature-content details {
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            margin: 9px 0;
+            background: var(--surface-deep);
+        }
+
+        .feature-content details details {
+            margin-left: 14px;
+            background: var(--panel-elevated);
+        }
+
+        .feature-content summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--text-heading);
+        }
+
+        .feature-content ul {
+            columns: 2;
+            padding-left: 18px;
+            margin: 8px 0 0;
+        }
+
+        .feature-content code {
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .replay-head {
+            margin-bottom: 14px;
+        }
+
+        .replay-head h3 {
+            margin: 0 0 4px;
+            color: var(--text-heading);
+        }
+
+        .replay-head p {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+        }
+
+        .recording-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .recording-summary-card {
+            display: grid;
+            gap: 4px;
+            padding: 12px 14px;
+            background: var(--surface-deep);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+        }
+
+        .recording-summary-label {
+            font-size: 0.76rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-secondary);
+        }
+
+        .recording-summary-value {
+            font-family: var(--font-mono);
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--text-heading);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .recording-summary-sub {
+            font-size: 0.8rem;
+            color: var(--muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        @media (max-width: 1100px) {
+            .recording-summary-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 860px) {
+            .recording-summary-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+        }
+
+        .icon-btn {
+            display: inline-grid;
+            place-items: center;
+            width: 2.35rem;
+            height: 2.35rem;
+            padding: 0;
+            background: var(--panel-elevated);
+            color: var(--text-heading);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            transition: background-color 0.16s ease, border-color 0.16s ease;
+        }
+
+        .icon-btn:hover {
+            background: var(--panel-hover);
+            border-color: var(--border-hover);
+        }
+
         @media (max-width: 1100px) {
 
             .kpi-grid,
-            .field-grid.four {
+            .field-grid.four,
+            .field-grid.five {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
 
             .log-toolbar {
                 grid-template-columns: 1fr;
-                justify-items: start;
+                justify-items: stretch;
+            }
+        }
+
+        @media (max-width: 860px) {
+            body {
+                height: auto;
+                min-height: 100vh;
+                overflow-y: auto;
+            }
+
+            .app-container {
+                position: relative;
+                grid-template-columns: minmax(0, 1fr);
+                grid-template-rows: auto minmax(0, 1fr);
+                grid-template-areas:
+                    "mobile-header"
+                    "workspace";
+                height: auto;
+                min-height: 100vh;
+                overflow: visible;
+            }
+
+            .mobile-header {
+                grid-area: mobile-header;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+                align-items: center;
+                gap: 12px;
+                padding: 12px 18px;
+                background: var(--bg-topbar);
+                backdrop-filter: blur(16px);
+                -webkit-backdrop-filter: blur(16px);
+                border-bottom: 1px solid var(--border);
+                position: sticky;
+                top: 0;
+                z-index: 1002;
+            }
+
+            .desktop-only {
+                display: none;
+            }
+
+            .sidebar {
+                display: none;
+                position: fixed;
+                top: 58px;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                width: 100vw;
+                max-width: 100vw;
+                height: calc(100vh - 58px);
+                max-height: calc(100vh - 58px);
+                overflow-y: auto;
+                padding: 18px 20px 28px;
+                background: var(--bg-sidebar);
+                backdrop-filter: blur(20px);
+                -webkit-backdrop-filter: blur(20px);
+                border-right: 0;
+                z-index: 1001;
+            }
+
+            .sidebar.open {
+                display: grid;
+                grid-template-rows: auto 1fr auto;
+                gap: 18px;
+                animation: dropdownReveal 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+
+            .sidebar.open .sidebar-header {
+                display: none;
+            }
+
+            @keyframes dropdownReveal {
+                from {
+                    opacity: 0;
+                    transform: translateY(-8px);
+                }
+
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            .button.full {
+                grid-template-columns: auto auto;
+                justify-content: center;
+                gap: 8px;
+            }
+
+            .content-area {
+                height: auto;
+                min-height: 0;
+                overflow: visible;
+            }
+
+            .topbar {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 10px;
+                padding: 12px 18px;
+            }
+
+            .topbar-controls {
+                justify-content: start;
+            }
+
+            .main {
+                padding: 20px 18px;
+                overflow: visible;
+            }
+
+            .page-header {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 12px;
+            }
+
+            .field-grid.two,
+            .field-grid.three,
+            .field-grid.four,
+            .field-grid.five,
+            .kpi-grid,
+            .feature-content ul {
+                grid-template-columns: minmax(0, 1fr);
+                columns: 1;
+            }
+
+            .input-with-actions {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .button-row {
+                grid-auto-flow: row;
+                justify-content: stretch;
+            }
+
+            .fill-panel {
+                height: auto;
+                min-height: 360px;
             }
         }
     </style>
 
-    <!-- Local Offline Lucide Icons Script -->
     <script src="lucide.min.js"></script>
     <script type="text/javascript" src="/eel.js"></script>
 </head>
@@ -1302,7 +1680,7 @@
                     <div class="brand-title">
                         <span>YGO3-<span class="accent">RESEARCH</span></span>
                     </div>
-                    <span class="version-tag">v1.4</span>
+                    <span class="version-tag">v1.5</span>
                 </div>
             </div>
 
@@ -1318,6 +1696,10 @@
                             <i data-lucide="coins" class="nav-icon"></i>
                             <span>BP Manager</span>
                         </button>
+                        <button class="nav-button" data-tab="admin">
+                            <i data-lucide="shield" class="nav-icon"></i>
+                            <span>Admin Tools</span>
+                        </button>
                         <button class="nav-button" data-tab="cards">
                             <i data-lucide="layers" class="nav-icon"></i>
                             <span>Card IDs</span>
@@ -1325,6 +1707,20 @@
                         <button class="nav-button" data-tab="ai">
                             <i data-lucide="bot" class="nav-icon"></i>
                             <span>NPC AI (LM Studio)</span>
+                        </button>
+                    </nav>
+                </div>
+
+                <div>
+                    <div class="nav-section-label">Live Data</div>
+                    <nav aria-label="Community Navigation">
+                        <button class="nav-button" data-tab="replays">
+                            <i data-lucide="clapperboard" class="nav-icon"></i>
+                            <span>Duel Recordings</span>
+                        </button>
+                        <button class="nav-button" data-tab="packs">
+                            <i data-lucide="package" class="nav-icon"></i>
+                            <span>Booster Catalogue</span>
                         </button>
                     </nav>
                 </div>
@@ -1379,19 +1775,19 @@
                 <div class="telemetry-strip">
                     <div class="telemetry-chip">
                         <i data-lucide="network"></i>
-                        <span>Host: <strong id="chipHost">0.0.0.0</strong></span>
+                        <span>Host: <strong id="chipHost"></strong></span>
                     </div>
                     <div class="telemetry-chip">
                         <i data-lucide="arrow-left-right"></i>
-                        <span>Ports: <strong id="chipPorts">7911 / 7921 / 7931</strong></span>
+                        <span>Ports: <strong id="chipPorts"></strong></span>
                     </div>
                     <div class="telemetry-chip">
                         <i data-lucide="globe"></i>
-                        <span>HTTP: <strong id="chipHttp">8080</strong></span>
+                        <span>HTTP: <strong id="chipHttp"></strong></span>
                     </div>
                     <div class="telemetry-chip">
                         <i data-lucide="cpu"></i>
-                        <span>NPC AI: <strong id="chipAiState">Disabled</strong></span>
+                        <span>NPC AI: <strong id="chipAiState"></strong></span>
                     </div>
                 </div>
 
@@ -1419,7 +1815,6 @@
                         </div>
                     </header>
 
-                    <!-- BENTO KPI OVERVIEW -->
                     <div class="kpi-grid">
                         <div class="kpi-card">
                             <div class="kpi-top">
@@ -1434,8 +1829,8 @@
                                 <span>Gate / Duel TCP</span>
                                 <i data-lucide="server"></i>
                             </div>
-                            <div class="kpi-value" id="kpiTcpPorts">7911 · 7931</div>
-                            <div class="kpi-sub" id="kpiFrontAddr">Front: 127.0.0.1:7921</div>
+                            <div class="kpi-value" id="kpiTcpPorts"></div>
+                            <div class="kpi-sub" id="kpiFrontAddr"></div>
                         </div>
 
                         <div class="kpi-card">
@@ -1452,7 +1847,7 @@
                                 <span>Default Target UID</span>
                                 <i data-lucide="user-check"></i>
                             </div>
-                            <div class="kpi-value" id="kpiTargetUid">1001</div>
+                            <div class="kpi-value" id="kpiTargetUid"></div>
                             <div class="kpi-sub">Shop BP injection target</div>
                         </div>
                     </div>
@@ -1470,7 +1865,7 @@
                             <label class="field full">
                                 <span>32-bit Python Executable</span>
                                 <div class="input-with-actions">
-                                    <input class="mono" id="python_executable" placeholder="C:\Python39-32\python.exe">
+                                    <input class="mono" id="python_executable" placeholder="Path to 32 bit python.exe">
                                     <button type="button" class="button secondary" id="browsePythonBtn">
                                         <i data-lucide="folder-open" class="btn-icon"></i>
                                         <span>Browse</span>
@@ -1591,38 +1986,48 @@
                             <span class="badge">TCP / HTTP</span>
                         </div>
 
-                        <div class="field-grid two">
+                        <div class="field-grid three">
                             <label class="field">
                                 <span>Host Address</span>
-                                <input class="mono" id="host" placeholder="0.0.0.0">
+                                <input class="mono" id="host">
                             </label>
 
                             <label class="field">
                                 <span>Front Address</span>
-                                <input class="mono" id="front_address" placeholder="127.0.0.1">
+                                <input class="mono" id="front_address">
                             </label>
 
-                            <div class="field-grid four full">
-                                <label class="field">
-                                    <span>Gate Port</span>
-                                    <input class="mono" id="gate_port" type="number" placeholder="7911">
-                                </label>
+                            <label class="field">
+                                <span>Admin Host</span>
+                                <input class="mono" id="admin_host">
+                            </label>
+                        </div>
 
-                                <label class="field">
-                                    <span>Front Port</span>
-                                    <input class="mono" id="front_port" type="number" placeholder="7921">
-                                </label>
+                        <div class="field-grid five full" style="margin-top:1rem;">
+                            <label class="field">
+                                <span>Gate Port</span>
+                                <input class="mono" id="gate_port" type="number">
+                            </label>
 
-                                <label class="field">
-                                    <span>Duel Port</span>
-                                    <input class="mono" id="duel_port" type="number" placeholder="7931">
-                                </label>
+                            <label class="field">
+                                <span>Front Port</span>
+                                <input class="mono" id="front_port" type="number">
+                            </label>
 
-                                <label class="field">
-                                    <span>HTTP Port</span>
-                                    <input class="mono" id="http_port" type="number" placeholder="8080">
-                                </label>
-                            </div>
+                            <label class="field">
+                                <span>Duel Port</span>
+                                <input class="mono" id="duel_port" type="number">
+                            </label>
+
+                            <label class="field">
+                                <span>HTTP Port</span>
+                                <input class="mono" id="http_port" type="number">
+                            </label>
+
+                            <label class="field">
+                                <span>Admin Port</span>
+                                <input class="mono" id="admin_port" type="number">
+                            </label>
                         </div>
                     </div>
                 </section>
@@ -1632,7 +2037,7 @@
                     <header class="page-header">
                         <div>
                             <h2>BP Manager</h2>
-                            <p>Inject Battle Points (BP) directly into a player's saved shop balance.</p>
+                            <p>Add Battle Points (BP) to a player's saved shop balance and manage BOOSTERPASS codes.</p>
                         </div>
                     </header>
 
@@ -1648,7 +2053,7 @@
                         <div class="field-grid two">
                             <label class="field">
                                 <span>User ID</span>
-                                <input class="mono" id="user_id" type="number" min="0" value="1001">
+                                <input class="mono" id="user_id" type="number" min="0">
                             </label>
 
                             <label class="field">
@@ -1669,6 +2074,152 @@
                                 <span>Add BP to Account</span>
                             </button>
                         </div>
+                    </div>
+
+                    <div class="panel narrow-panel">
+                        <div class="panel-header">
+                            <div class="panel-title-group">
+                                <i data-lucide="ticket" class="panel-title-icon"></i>
+                                <h3>BOOSTERPASS Codes</h3>
+                            </div>
+                            <span class="badge">16 characters</span>
+                        </div>
+
+                        <div class="field-grid">
+                            <div class="field-grid two">
+                                <label class="field">
+                                    <span>BP the code gives</span>
+                                    <input class="mono" id="adminCodeBp" type="number" min="1" placeholder="e.g. 500">
+                                </label>
+                                <label class="field">
+                                    <span>Players who may use it (empty = any number)</span>
+                                    <input class="mono" id="adminCodeUses" type="number" min="1" placeholder="e.g. 10">
+                                </label>
+                            </div>
+                            <label class="field">
+                                <span>Your own code (empty = make a random one)</span>
+                                <input class="mono" id="adminCodeCustom" type="text" maxlength="16"
+                                    placeholder="16 letters and digits">
+                            </label>
+                        </div>
+
+                        <div class="button-row">
+                            <button class="button primary" id="adminCodeCreateButton">
+                                <i data-lucide="plus-circle" class="btn-icon"></i>
+                                <span>Create Code</span>
+                            </button>
+                            <button class="button secondary" id="adminCodesRefreshButton">
+                                <i data-lucide="refresh-cw" class="btn-icon"></i>
+                                <span>Refresh List</span>
+                            </button>
+                        </div>
+                        <p class="admin-note">Each player can use a code once, in the game's BOOSTERPASS window. BP are
+                            added to the shared account.</p>
+
+                        <div class="admin-sub">Codes</div>
+                        <div class="admin-table-wrap">
+                            <table class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>Code</th>
+                                        <th>BP</th>
+                                        <th>Used by</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="adminCodesBody"></tbody>
+                            </table>
+                            <div class="admin-empty" id="adminCodesEmpty">No codes yet.</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ADMIN TOOLS -->
+                <section class="tab" id="tab-admin">
+                    <header class="page-header">
+                        <div>
+                            <h2>Admin Tools</h2>
+                            <p>Post chat lines, login news and maintenance notices to your players.</p>
+                        </div>
+                    </header>
+
+                    <div class="admin-banner" id="adminBanner">
+                        <span class="dot"></span>
+                        <span id="adminBannerText">Server stopped.</span>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title-group">
+                                <i data-lucide="megaphone" class="panel-title-icon"></i>
+                                <h3>Announcements</h3>
+                            </div>
+                            <span class="badge">news · chat · maintenance</span>
+                        </div>
+
+                        <div class="admin-sub" style="margin-top: 18px;">Message in everybody's chat</div>
+                        <div class="field-grid">
+                            <label class="field">
+                                <span>Line from "Host"</span>
+                                <input id="adminSayText" type="text" maxlength="200"
+                                    placeholder="e.g. Tournament starts in 10 minutes">
+                            </label>
+                        </div>
+                        <div class="button-row">
+                            <button class="button primary" id="adminSayButton">
+                                <i data-lucide="send" class="btn-icon"></i>
+                                <span>Send</span>
+                            </button>
+                        </div>
+
+                        <div class="admin-sub">Login news</div>
+                        <div class="field-grid two">
+                            <label class="field">
+                                <span>Title</span>
+                                <input id="adminNewsTitle" type="text" maxlength="64" placeholder="Server news">
+                            </label>
+                            <label class="field">
+                                <span>Text</span>
+                                <input id="adminNewsBody" type="text" maxlength="512"
+                                    placeholder="Shown when players log in">
+                            </label>
+                        </div>
+                        <div class="button-row">
+                            <button class="button primary" id="adminNewsSetButton">
+                                <i data-lucide="newspaper" class="btn-icon"></i>
+                                <span>Set News</span>
+                            </button>
+                            <button class="button secondary" id="adminNewsClearButton">
+                                <i data-lucide="trash-2" class="btn-icon"></i>
+                                <span>Clear News</span>
+                            </button>
+                        </div>
+                        <p class="admin-note">Setting the news replaces what was there and shows it to players who are
+                            already online.</p>
+
+                        <div class="admin-sub">Maintenance countdown</div>
+                        <div class="field-grid two">
+                            <label class="field">
+                                <span>Minutes until maintenance</span>
+                                <input class="mono" id="adminMaintMinutes" type="number" min="1" placeholder="e.g. 10">
+                            </label>
+                            <label class="field">
+                                <span>Message</span>
+                                <input id="adminMaintMessage" type="text" maxlength="200" placeholder="Optional">
+                            </label>
+                        </div>
+                        <div class="button-row">
+                            <button class="button primary" id="adminMaintStartButton">
+                                <i data-lucide="wrench" class="btn-icon"></i>
+                                <span>Start Countdown</span>
+                            </button>
+                            <button class="button secondary" id="adminMaintStopButton">
+                                <i data-lucide="x-circle" class="btn-icon"></i>
+                                <span>Call Off</span>
+                            </button>
+                        </div>
+                        <p class="admin-note">The game shows a maintenance icon with the time left. The server itself
+                            stays up. A called-off countdown clears from the icon at the next login.</p>
                     </div>
                 </section>
 
@@ -1793,6 +2344,33 @@
                         <div class="callout-box subtle">
                             <i data-lucide="info" class="callout-icon"></i>
                             <span id="aiStatus">AI status: Not tested</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SHARED COMMUNITY VIEW (PLAYERS / TEAMS / REPLAYS / PACKS) -->
+                <section class="tab" id="tab-community">
+                    <header class="page-header">
+                        <div>
+                            <h2 id="communityTitle">Community</h2>
+                            <p id="communityDesc">Live server data.</p>
+                        </div>
+                    </header>
+
+                    <div class="panel">
+                        <div class="feature-toolbar">
+                            <input id="featureSearch" type="search" placeholder="Search this view…">
+                            <button class="button secondary small" id="featureReload">
+                                <i data-lucide="refresh-cw" class="btn-icon"></i>
+                                <span>Refresh Data</span>
+                            </button>
+                            <button class="button secondary small hidden" id="backToList">
+                                <i data-lucide="arrow-left" class="btn-icon"></i>
+                                <span>Back to Recordings</span>
+                            </button>
+                        </div>
+                        <div id="featureContent" class="feature-content">
+                            <div class="empty-state">Choose a module to load its data.</div>
                         </div>
                     </div>
                 </section>
@@ -1994,6 +2572,8 @@
             "front_port",
             "duel_port",
             "http_port",
+            "admin_host",
+            "admin_port",
             "user_id",
             "npc_ai_enabled",
             "lm_studio_url",
@@ -2011,12 +2591,21 @@
             "JetBrains Mono": "'JetBrains Mono', Consolas, monospace"
         };
 
+        const COMMUNITY_ROUTES = {
+            replays: ["/api/features/replays", "Duel Recordings", "Browse recorded duel event timelines and match outcomes."],
+            packs: ["/api/features/packs", "Booster Catalogue", "Browse booster packs and card rarity tiers."]
+        };
+
         const MAX_LOG_LINES = 1500;
 
         let serverRunning = false;
         let availableModels = [];
         let loadedModels = {};
         let cardGenerationRunning = false;
+        let launcherConfig = {};
+        let currentCommunityRoute = null;
+        let featureRows = [];
+        let activeReplay = null;
 
         const activeLevelFilters = {
             serverLog: "all",
@@ -2029,6 +2618,16 @@
             const el = byId(id);
             if (el) el.value = val ?? "";
         };
+
+        function esc(v) {
+            return String(v ?? "").replace(/[&<>"']/g, c => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;"
+            }[c]));
+        }
 
         function debounce(fn, delay = 150) {
             let timer;
@@ -2072,16 +2671,26 @@
             }
         }
 
+        function httpBaseUrl() {
+            const cfg = launcherConfig || {};
+            let h = String(cfg.host || "127.0.0.1").trim();
+            if (!h || h === "0.0.0.0" || h === "::") h = "127.0.0.1";
+            if (h.includes("://")) return h.replace(/\/$/, "");
+            const p = String(cfg.http_port || "").trim();
+            return p ? `http://${h}:${p}` : "";
+        }
+
         function syncTelemetryOverview() {
-            const hostVal = value("host") || "0.0.0.0";
-            const frontAddr = value("front_address") || "127.0.0.1";
-            const gate = value("gate_port") || "7911";
-            const front = value("front_port") || "7921";
-            const duel = value("duel_port") || "7931";
-            const http = value("http_port") || "8080";
-            const uid = value("user_id") || "1001";
-            const aiOn = byId("npc_ai_enabled")?.checked ?? false;
-            const selectedModel = value("modelSelector") || value("lm_studio_model") || "No active model";
+            const cfg = launcherConfig || {};
+            const hostVal = String(cfg.host ?? "").trim() || "-";
+            const frontAddr = String(cfg.front_address ?? "").trim() || "-";
+            const gate = String(cfg.gate_port ?? "").trim() || "-";
+            const front = String(cfg.front_port ?? "").trim() || "-";
+            const duel = String(cfg.duel_port ?? "").trim() || "-";
+            const http = String(cfg.http_port ?? "").trim() || "-";
+            const uid = String(cfg.user_id ?? "").trim() || "-";
+            const aiOn = /^(true|1|yes|on)$/i.test(String(cfg.npc_ai_enabled ?? ""));
+            const selectedModel = String(cfg.lm_studio_model ?? "").trim() || "No active model";
 
             if (byId("chipHost")) byId("chipHost").textContent = hostVal;
             if (byId("chipPorts")) byId("chipPorts").textContent = `${gate} / ${front} / ${duel}`;
@@ -2093,6 +2702,493 @@
             if (byId("kpiAiMode")) byId("kpiAiMode").textContent = aiOn ? "ENABLED" : "DISABLED";
             if (byId("kpiAiModel")) byId("kpiAiModel").textContent = selectedModel;
             if (byId("kpiTargetUid")) byId("kpiTargetUid").textContent = uid;
+        }
+
+        function applyConfigToUI(cfg = {}) {
+            launcherConfig = cfg || {};
+
+            CONFIG_FIELDS.forEach(key => {
+                const element = byId(key);
+                if (!element) return;
+                if (key === "npc_ai_enabled") {
+                    element.checked = /^(true|1|yes|on)$/i.test(String(launcherConfig[key]));
+                } else {
+                    setValue(key, launcherConfig[key] ?? "");
+                }
+            });
+
+            if (byId("modelSelector") && launcherConfig.lm_studio_model !== undefined) {
+                const selector = byId("modelSelector");
+                const targetModel = String(launcherConfig.lm_studio_model || "");
+                if (targetModel && !Array.from(selector.options).some(opt => opt.value === targetModel)) {
+                    const option = document.createElement("option");
+                    option.value = targetModel;
+                    option.textContent = targetModel;
+                    selector.appendChild(option);
+                }
+                selector.value = targetModel;
+                updateModelButton();
+            }
+
+            applyGuiPreferences({
+                theme: launcherConfig.gui_theme || "dark",
+                fontFamily: launcherConfig.gui_font_family || "Inter",
+                fontSize: launcherConfig.gui_font_size || "14"
+            });
+
+            syncTelemetryOverview();
+        }
+
+        function collectSettings() {
+            const settings = {};
+            CONFIG_FIELDS.forEach(key => {
+                const element = byId(key);
+                if (!element) return;
+                settings[key] = key === "npc_ai_enabled" ? String(element.checked) : element.value.trim();
+            });
+            return settings;
+        }
+
+
+        /* ---------- COMMUNITY VIEWS ---------- */
+
+        function renderFeatureTable(headers, rows) {
+            if (!rows.length) {
+                return '<div class="empty-state">No data available yet.</div>';
+            }
+
+            return '<div class="table-wrap"><table class="feature-table"><thead><tr>' +
+                headers.map(x => `<th>${esc(x)}</th>`).join("") +
+                '</tr></thead><tbody>' + rows.join("") +
+                '</tbody></table></div>';
+        }
+
+        /*
+         * Community data is retrieved by Python through Eel.
+         * The GUI itself renders all HTML.
+         *
+         * Required Python functions:
+         *   eel.get_community_feature(feature)()
+         *   eel.get_community_replay(replay_id)()
+         */
+
+        async function communityApi(feature) {
+            if (!["players", "teams", "replays", "packs"].includes(feature)) {
+                throw new Error("Unknown community feature.");
+            }
+
+            if (typeof eel.get_community_feature !== "function") {
+                throw new Error(
+                    "The Python GUI backend is missing get_community_feature()."
+                );
+            }
+
+            const result = await eel.get_community_feature(feature)();
+
+            if (!result || result.success !== true) {
+                throw new Error(result?.error || "Could not retrieve community data.");
+            }
+
+            return result;
+        }
+
+        async function loadCommunityFeature() {
+            const route = COMMUNITY_ROUTES[currentCommunityRoute];
+            if (!route) return;
+
+            activeReplay = null;
+            featureRows = [];
+
+            byId("backToList")?.classList.add("hidden");
+
+            const content = byId("featureContent");
+            if (!content) return;
+
+            content.innerHTML = '<div class="empty-state">Loading…</div>';
+
+            try {
+                const data = await communityApi(currentCommunityRoute);
+
+                if (!Array.isArray(data.items)) {
+                    throw new Error("The server returned an invalid data format.");
+                }
+
+                featureRows = data.items;
+                renderCommunityFeature();
+
+            } catch (error) {
+                content.innerHTML =
+                    `<div class="empty-state">${esc(error.message || error)}</div>`;
+            }
+        }
+
+        function renderCommunityFeature() {
+            const content = byId("featureContent");
+            if (!content) return;
+
+            const q = (byId("featureSearch")?.value || "").toLowerCase();
+
+            byId("backToList")?.classList.toggle("hidden", !activeReplay);
+
+            if (currentCommunityRoute === "players" ||
+                currentCommunityRoute === "teams") {
+
+                const rows = featureRows.filter(r =>
+                    JSON.stringify(r).toLowerCase().includes(q)
+                );
+
+                const isTeam = currentCommunityRoute === "teams";
+
+                content.innerHTML = renderFeatureTable(
+                    isTeam
+                        ? ["#", "Team", "Members", "Wins", "Losses", "Draws", "Duels", "Win rate"]
+                        : ["#", "Player", "Wins", "Losses", "Draws", "Duels", "Win rate"],
+
+                    rows.map((r, i) => `
+                <tr>
+                    <td>${i + 1}</td>
+                    <td>${esc(r.name)}</td>
+                    ${isTeam ? `<td>${esc(r.members ?? "")}</td>` : ""}
+                    <td>${esc(r.wins ?? 0)}</td>
+                    <td>${esc(r.losses ?? 0)}</td>
+                    <td>${esc(r.draws ?? 0)}</td>
+                    <td>${esc(r.duels ?? 0)}</td>
+                    <td>${Number(r.win_rate || 0).toFixed(1)}%</td>
+                </tr>
+            `)
+                );
+
+                return;
+            }
+
+            if (currentCommunityRoute === "replays") {
+                const replaySearchInput =
+                    byId("communitySearch") ||
+                    document.querySelector(
+                        '[data-search], input[placeholder*="Search" i], input[type="search"]'
+                    );
+
+                if (replaySearchInput && replaySearchInput.dataset.replaySearchBound !== "true") {
+                    replaySearchInput.dataset.replaySearchBound = "true";
+                    replaySearchInput.addEventListener("input", () => {
+                        if (typeof renderCommunityFeature === "function") {
+                            renderCommunityFeature();
+                        } else if (typeof renderCommunity === "function") {
+                            renderCommunity();
+                        }
+                    });
+                }
+
+                const q = (replaySearchInput?.value || "").trim().toLowerCase();
+
+                function getReplaySearchText(r) {
+                    const p1 = r.player_1_name || "Player 1";
+                    const p2 = r.player_2_name || "Player 2";
+                    const rawResult = String(r.result || "").toLowerCase();
+
+                    let resultAliases = rawResult;
+                    if (
+                        rawResult === "1-0" ||
+                        rawResult === "p1" ||
+                        rawResult.includes("player_1") ||
+                        rawResult.includes("player 1")
+                    ) {
+                        resultAliases += ` player 1 wins p1 wins ${p1} wins`;
+                    } else if (
+                        rawResult === "0-1" ||
+                        rawResult === "p2" ||
+                        rawResult.includes("player_2") ||
+                        rawResult.includes("player 2")
+                    ) {
+                        resultAliases += ` player 2 wins p2 wins ${p2} wins`;
+                    } else if (
+                        rawResult === "1/2-1/2" ||
+                        rawResult.includes("draw") ||
+                        rawResult.includes("tie")
+                    ) {
+                        resultAliases += " draw tie";
+                    }
+
+                    return `${r.date || ""} ${p1} ${p2} ${resultAliases}`.toLowerCase();
+                }
+
+                if (activeReplay) {
+                    const allEvents = Array.isArray(activeReplay.events)
+                        ? activeReplay.events
+                        : [];
+
+                    const indexedEvents = allEvents
+                        .map((event, index) => ({ event, num: index + 1 }))
+                        .filter(({ event }) =>
+                            !q || JSON.stringify(event).toLowerCase().includes(q)
+                        );
+
+                    content.innerHTML =
+                        `<div class="replay-head">
+                    <h3>
+                        ${esc(activeReplay.player_1_name || "Player 1")}
+                        vs
+                        ${esc(activeReplay.player_2_name || "Player 2")}
+                    </h3>
+                    <p>
+                        ${esc(activeReplay.date || "")}
+                        · Result: ${esc(activeReplay.result || "unknown")}
+                        · ${indexedEvents.length} ${indexedEvents.length === 1 ? "event" : "events"}
+                        ${q ? `(filtered from ${allEvents.length})` : ""}
+                    </p>
+                </div>` +
+                        (indexedEvents.length
+                            ? renderFeatureTable(
+                                ["#", "Event", "Recorded data"],
+                                indexedEvents.map(({ event, num }) => `
+                        <tr>
+                            <td>${num}</td>
+                            <td>${esc(event.type || event.message || "Engine event")}</td>
+                            <td><code>${esc(JSON.stringify(event).slice(0, 500))}</code></td>
+                        </tr>
+                    `)
+                            )
+                            : '<div class="empty-state">No matching events found.</div>');
+
+                    byId("backToList")?.classList.remove("hidden");
+                    return;
+                }
+
+                const rows = featureRows.filter(r =>
+                    !q || getReplaySearchText(r).includes(q)
+                );
+
+                const summaryHtml = `
+                <div class="replay-head">
+                    <h3>Replays Overview</h3>
+                    <p>
+                        ${rows.length} ${rows.length === 1 ? "record" : "records"}
+                        ${rows.length !== featureRows.length ? `(filtered from ${featureRows.length})` : ""}
+                    </p>
+                </div>`;
+
+                content.innerHTML = rows.length
+                    ? summaryHtml +
+                    `<div class="table-wrap">
+                <table class="feature-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Player 1</th>
+                            <th>Player 2</th>
+                            <th>Result</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(r => `
+                            <tr>
+                                <td>${esc(r.date || "")}</td>
+                                <td>${esc(r.player_1_name || "")}</td>
+                                <td>${esc(r.player_2_name || "")}</td>
+                                <td>${esc(r.result || "")}</td>
+                                <td>
+                                    <button
+                                        type="button"
+                                        class="button secondary small"
+                                        data-replay="${esc(r.id)}">
+                                        View recording
+                                    </button>
+                                </td>
+                            </tr>
+                        `).join("")}
+                    </tbody>
+                </table>
+            </div>`
+                    : `<div class="empty-state">${q ? "No matching recordings found." : "No recordings saved yet."}</div>`;
+
+                content.querySelectorAll("[data-replay]").forEach(btn => {
+                    btn.addEventListener("click", () => {
+                        openCommunityReplay(btn.dataset.replay);
+                    });
+                });
+
+                return;
+            }
+
+            if (currentCommunityRoute === "packs") {
+                const packSearchInput =
+                    byId("communitySearch") ||
+                    document.querySelector(
+                        '[data-search], input[placeholder*="Search" i], input[type="search"]'
+                    );
+
+                if (packSearchInput && packSearchInput.dataset.packSearchBound !== "true") {
+                    packSearchInput.dataset.packSearchBound = "true";
+                    packSearchInput.addEventListener("input", () => {
+                        if (typeof renderCommunityFeature === "function") {
+                            renderCommunityFeature();
+                        } else if (typeof renderCommunity === "function") {
+                            renderCommunity();
+                        }
+                    });
+                }
+
+                const q = (packSearchInput?.value || "").trim().toLowerCase();
+                const packs = featureRows.filter(p =>
+                    !q || JSON.stringify(p).toLowerCase().includes(q)
+                );
+
+                const summaryHtml = `
+                <div class="replay-head">
+                    <h3>Packs Overview</h3>
+                    <p>
+                        ${packs.length} ${packs.length === 1 ? "record" : "records"}
+                        ${packs.length !== featureRows.length ? `(filtered from ${featureRows.length})` : ""}
+                    </p>
+                </div>`;
+
+                content.innerHTML = packs.length
+                    ? summaryHtml +
+                    `<div class="table-wrap">
+                          <table class="feature-table">
+                              <thead>
+                                  <tr>
+                                      <th>Pack</th>
+                                      <th>ID</th>
+                                      <th>Unique Cards</th>
+                                      <th>Tiers</th>
+                                      <th></th>
+                                  </tr>
+                              </thead>
+                              <tbody>
+                                  ${packs.map(p => {
+                        const tiers = Array.isArray(p.tiers) ? p.tiers : [];
+                        const cardListHtml = tiers
+                            .map(t => {
+                                const cards = Array.isArray(t.cards) ? t.cards : [];
+                                return `
+                                                  <details style="margin-top:8px;">
+                                                      <summary>
+                                                          ${esc(t.rarity)} — ${cards.length} ${cards.length === 1 ? "card" : "cards"}
+                                                      </summary>
+                                                      <ul>
+                                                          ${cards.map(c => `
+                                                              <li>
+                                                                  ${esc(c.name)}
+                                                                  <small>#${esc(c.id)}</small>
+                                                              </li>
+                                                          `).join("")}
+                                                      </ul>
+                                                  </details>
+                                              `;
+                            })
+                            .join("");
+
+                        return `
+                                          <tr>
+                                              <td>
+                                                  <strong>${esc(p.name || "")}</strong>
+                                                  ${p.description ? `<div class="muted">${esc(p.description)}</div>` : ""}
+                                              </td>
+                                              <td>${esc(p.id ?? "")}</td>
+                                              <td>${esc(p.unique_cards ?? 0)}</td>
+                                              <td>${tiers.length}</td>
+                                              <td>
+                                                  <button
+                                                      type="button"
+                                                      class="button secondary small"
+                                                      data-pack-toggle="${esc(p.id)}">
+                                                      View pack
+                                                  </button>
+                                              </td>
+                                          </tr>
+                                          <tr id="pack-detail-${esc(p.id)}" class="hidden">
+                                              <td colspan="5">
+                                                  <p class="admin-note">
+                                                      ${esc(p.unique_cards ?? 0)} unique card rows
+                                                      · ${tiers.length} tiers
+                                                  </p>
+                                                  ${cardListHtml || '<div class="muted">No tiers available.</div>'}
+                                              </td>
+                                          </tr>
+                                      `;
+                    }).join("")}
+                              </tbody>
+                          </table>
+                      </div>`
+                    : `<div class="empty-state">${q ? "No matching packs found." : "No booster packs were found."}</div>`;
+
+                content.querySelectorAll("[data-pack-toggle]").forEach(btn => {
+                    btn.addEventListener("click", () => {
+                        const detailRow = byId(`pack-detail-${btn.dataset.packToggle}`);
+                        if (!detailRow) return;
+                        const isHidden = detailRow.classList.toggle("hidden");
+                        btn.textContent = isHidden ? "View pack" : "Hide pack";
+                    });
+                });
+
+                return;
+            }
+        }
+        async function openCommunityReplay(id) {
+            const content = byId("featureContent");
+            if (!content) return;
+
+            content.innerHTML = '<div class="empty-state">Loading recording…</div>';
+
+            try {
+                if (typeof eel.get_community_replay !== "function") {
+                    throw new Error(
+                        "The Python GUI backend is missing get_community_replay()."
+                    );
+                }
+
+                const result = await eel.get_community_replay(String(id))();
+
+                if (!result || result.success !== true || !result.item) {
+                    throw new Error(result?.error || "Recording could not be loaded.");
+                }
+
+                activeReplay = result.item;
+                renderCommunityFeature();
+
+            } catch (error) {
+                content.innerHTML =
+                    `<div class="empty-state">${esc(error.message || error)}</div>`;
+            }
+        }
+
+        async function refreshDataForActiveTab() {
+            const activeTab = document.querySelector(".tab.active")?.id;
+            if (activeTab === "tab-bp") {
+                await adminRefreshCodes(true);
+            } else if (activeTab === "tab-admin") {
+                updateAdminAvailability();
+            } else if (activeTab === "tab-ai") {
+                updateModelButton();
+            } else if (activeTab === "tab-community" && currentCommunityRoute) {
+                await loadCommunityFeature();
+            }
+        }
+
+        async function loadSettings() {
+            try {
+                const config = await eel.get_config()();
+                applyConfigToUI(config || {});
+                await refreshDataForActiveTab();
+            } catch (error) {
+                applyConfigToUI({});
+                showToast(`Could not load settings: ${error}`, "error");
+            }
+        }
+
+        async function saveSettings(customToast = "Settings saved to ygo3_launcher_config.json.") {
+            try {
+                const payload = collectSettings();
+                const result = await eel.save_config(payload)();
+                if (!result.success) throw new Error(result.error);
+                applyConfigToUI(result.config || payload);
+                await refreshDataForActiveTab();
+                showToast(customToast, "success");
+            } catch (error) {
+                showToast(`Could not save settings: ${error}`, "error");
+            }
         }
 
         function showToast(message, type = "info") {
@@ -2220,9 +3316,24 @@
         function showTab(name) {
             document.querySelectorAll(".tab").forEach(tab => tab.classList.remove("active"));
             document.querySelectorAll(".nav-button").forEach(btn => btn.classList.remove("active"));
-            byId(`tab-${name}`)?.classList.add("active");
             document.querySelector(`.nav-button[data-tab="${name}"]`)?.classList.add("active");
             byId("sidebar")?.classList.remove("open");
+
+            if (COMMUNITY_ROUTES[name]) {
+                currentCommunityRoute = name;
+                const [, title, desc] = COMMUNITY_ROUTES[name];
+                if (byId("communityTitle")) byId("communityTitle").textContent = title;
+                if (byId("communityDesc")) byId("communityDesc").textContent = desc;
+                byId("tab-community")?.classList.add("active");
+                loadCommunityFeature();
+                return;
+            }
+
+            currentCommunityRoute = null;
+            byId(`tab-${name}`)?.classList.add("active");
+            if (name === "admin") updateAdminAvailability();
+            if (name === "bp") adminRefreshCodes();
+            if (name === "ai") updateModelButton();
         }
 
         document.querySelectorAll(".nav-button").forEach(button => {
@@ -2245,6 +3356,7 @@
 
             byId("startServerButton").disabled = running;
             byId("stopServerButton").disabled = !running;
+            updateAdminAvailability();
 
             if (message) showToast(message, running ? "success" : "info");
         }
@@ -2255,53 +3367,6 @@
                 updateServerStatus(result.running);
             } catch (error) {
                 console.error(error);
-            }
-        }
-
-        async function loadSettings() {
-            try {
-                const config = await eel.get_config()();
-                CONFIG_FIELDS.forEach(key => {
-                    const element = byId(key);
-                    if (!element) return;
-                    if (key === "npc_ai_enabled") {
-                        element.checked = /^(true|1|yes|on)$/i.test(String(config[key]));
-                    } else if (config[key] !== undefined && config[key] !== null && config[key] !== "") {
-                        setValue(key, config[key]);
-                    }
-                });
-
-                applyGuiPreferences({
-                    theme: config.gui_theme || "dark",
-                    fontFamily: config.gui_font_family || "Inter",
-                    fontSize: config.gui_font_size || "14"
-                });
-
-                syncTelemetryOverview();
-            } catch (error) {
-                applyGuiPreferences();
-                showToast(`Could not load settings: ${error}`, "error");
-            }
-        }
-
-        function collectSettings() {
-            const settings = {};
-            CONFIG_FIELDS.forEach(key => {
-                const element = byId(key);
-                if (!element) return;
-                settings[key] = key === "npc_ai_enabled" ? String(element.checked) : element.value.trim();
-            });
-            return settings;
-        }
-
-        async function saveSettings(customToast = "Settings saved to ygo3_launcher_config.json.") {
-            try {
-                const result = await eel.save_config(collectSettings())();
-                if (!result.success) throw new Error(result.error);
-                syncTelemetryOverview();
-                showToast(customToast, "success");
-            } catch (error) {
-                showToast(`Could not save settings: ${error}`, "error");
             }
         }
 
@@ -2424,7 +3489,8 @@
             refreshBtn.disabled = true;
             byId("aiStatus").textContent = "AI status: Connecting to LM Studio...";
             try {
-                await eel.save_config(collectSettings())();
+                const saveRes = await eel.save_config(collectSettings())();
+                if (saveRes?.config) applyConfigToUI(saveRes.config);
                 const result = await eel.test_lm_studio()();
                 if (!result.success) throw new Error(result.error);
 
@@ -2441,6 +3507,7 @@
                 });
 
                 selector.value = result.selected || availableModels[0] || "";
+                launcherConfig.lm_studio_model = selector.value;
                 updateModelButton();
 
                 byId("aiStatus").textContent = `AI status: Connected (${availableModels.length} models available) • Selected: ${selector.value || "None"}`;
@@ -2492,7 +3559,15 @@
 
             const result = await eel.save_ai_settings(enabled, url, model, timeout)();
             if (!result.success) throw new Error(result.error);
-            syncTelemetryOverview();
+            if (result.config) {
+                applyConfigToUI(result.config);
+            } else {
+                launcherConfig.npc_ai_enabled = String(enabled);
+                launcherConfig.lm_studio_url = url;
+                launcherConfig.lm_studio_model = model;
+                launcherConfig.npc_ai_timeout = timeout;
+                syncTelemetryOverview();
+            }
             return result;
         }
 
@@ -2527,7 +3602,6 @@
                 .catch(() => showToast("Failed to copy logs.", "error"));
         }
 
-        // Native Dialog Browse Handlers
         async function handleBrowseFile(fieldId, title, filetypes) {
             const path = await eel.browse_file(title, filetypes)();
             if (path) setValue(fieldId, path);
@@ -2543,7 +3617,6 @@
             if (path) setValue(fieldId, path);
         }
 
-// Local Folder Quick-Set Handler (Creates data & www folders)
         async function handleSetLocalDir(fieldId, folderName) {
             try {
                 const result = await eel.get_local_runtime_path(folderName)();
@@ -2557,7 +3630,6 @@
             }
         }
 
-        // Local File Quick-Set Handler (Non-creating for server script and card-ids.json)
         async function handleSetLocalFile(fieldId, fileName, createIfMissing = false) {
             try {
                 const result = await eel.get_local_runtime_file_path(fileName, createIfMissing)();
@@ -2571,13 +3643,11 @@
             }
         }
 
-        // Clean, non-duplicate event listener bindings
         byId("setLocalServerScriptBtn")?.addEventListener("click", () => handleSetLocalFile("server_script", "ygo3_server.py", false));
         byId("setLocalCardIdsBtn")?.addEventListener("click", () => handleSetLocalFile("card_ids_output", "card-ids.json", false));
         byId("setLocalDataDirBtn")?.addEventListener("click", () => handleSetLocalDir("data_dir", "data"));
         byId("setLocalWebDirBtn")?.addEventListener("click", () => handleSetLocalDir("web_dir", "www"));
 
-        // Native Dialog Browse Handlers
         byId("browsePythonBtn")?.addEventListener("click", () => handleBrowseFile("python_executable", "Select Python Executable", [["Python Executable", "*.exe"], ["All files", "*.*"]]));
         byId("browseServerScriptBtn")?.addEventListener("click", () => handleBrowseFile("server_script", "Select Server Script", [["Python Script", "*.py"], ["All files", "*.*"]]));
         byId("browseGameDirBtn")?.addEventListener("click", () => handleBrowseDir("game_dir", "Select Game Directory"));
@@ -2587,20 +3657,15 @@
         byId("browseDataDirBtn")?.addEventListener("click", () => handleBrowseDir("data_dir", "Select Data Directory"));
         byId("browseWebDirBtn")?.addEventListener("click", () => handleBrowseDir("web_dir", "Select Web Directory"));
         byId("browseCardIdsOutputBtn")?.addEventListener("click", () => handleBrowseSaveFile("card_ids_output", "Save Card IDs JSON As", [["JSON Files", "*.json"], ["All files", "*.*"]], ".json"));
-        // Configuration Import Handlers
-        byId("importConfigButton")?.addEventListener("click", () => {
-            byId("importConfigFileInput")?.click();
-        });
 
+        byId("importConfigButton")?.addEventListener("click", () => byId("importConfigFileInput")?.click());
         byId("importConfigFileInput")?.addEventListener("change", async (e) => {
             const file = e.target.files?.[0];
             if (!file) return;
-
             try {
                 const text = await file.text();
                 const result = await eel.import_launcher_config(text)();
                 if (!result.success) throw new Error(result.error);
-
                 await loadSettings();
                 showToast("Configuration successfully imported.", "success");
             } catch (err) {
@@ -2617,6 +3682,13 @@
         byId("checkPythonButton")?.addEventListener("click", checkPython);
         byId("grantBPButton")?.addEventListener("click", grantBP);
         byId("generateCardsButton")?.addEventListener("click", generateCardIds);
+
+        byId("featureReload")?.addEventListener("click", () => loadCommunityFeature());
+        byId("featureSearch")?.addEventListener("input", debounce(() => renderCommunityFeature(), 120));
+        byId("backToList")?.addEventListener("click", () => {
+            activeReplay = null;
+            renderCommunityFeature();
+        });
 
         byId("refreshModelsButton")?.addEventListener("click", refreshModels);
         byId("modelActionButton")?.addEventListener("click", toggleModel);
@@ -2698,15 +3770,187 @@
         byId("copyAILogsButton")?.addEventListener("click", () => copyLogs("aiLog"));
 
         window.addEventListener("keydown", (e) => {
-            if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r")) {
-                e.preventDefault();
-                return;
-            }
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
                 e.preventDefault();
                 saveSettings();
             }
         });
+
+        /* ---------- ADMIN TOOLS ---------- */
+        const ADMIN_LIVE_ONLY = [
+            "adminSayButton",
+            "adminNewsSetButton",
+            "adminNewsClearButton",
+            "adminMaintStartButton",
+            "adminMaintStopButton"
+        ];
+
+        function updateAdminAvailability() {
+            byId("adminBanner")?.classList.toggle("live", serverRunning);
+            const text = byId("adminBannerText");
+            if (text) {
+                text.textContent = serverRunning
+                    ? "Server online: changes reach connected players immediately."
+                    : "Server stopped: only actions that edit saved data work. Start the server for chat lines and maintenance.";
+            }
+            ADMIN_LIVE_ONLY.forEach(id => {
+                const el = byId(id);
+                if (el) el.disabled = !serverRunning;
+            });
+        }
+
+        async function adminRun(op, args = []) {
+            const result = await eel.admin_run(op, args)();
+            if (!result.success) throw new Error(result.error);
+            return result;
+        }
+
+        async function adminAction(op, args, { refresh = [], clear = [], toast = true } = {}) {
+            try {
+                const result = await adminRun(op, args);
+                if (toast) showToast(result.message || "Done.", "success");
+                clear.forEach(id => setValue(id, ""));
+                refresh.forEach(fn => fn());
+                return result;
+            } catch (error) {
+                showToast(error.message || String(error), "error");
+                return null;
+            }
+        }
+
+        function adminCell(text, className) {
+            const td = document.createElement("td");
+            td.textContent = text;
+            if (className) td.className = className;
+            return td;
+        }
+
+        function adminButton(label, className, onClick, disabled = false) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = `button ${className} small`;
+            btn.textContent = label;
+            btn.disabled = disabled;
+            btn.addEventListener("click", (event) => {
+                event.stopPropagation();
+                onClick();
+            });
+            return btn;
+        }
+
+        function adminFill(bodyId, emptyId, rows, emptyText, build) {
+            const body = byId(bodyId);
+            const empty = byId(emptyId);
+            if (!body) return;
+            body.replaceChildren(...rows.map(build));
+            if (empty) {
+                empty.textContent = emptyText;
+                empty.style.display = rows.length ? "none" : "block";
+            }
+        }
+
+        async function adminList(op, quiet) {
+            try {
+                return (await adminRun(op)).rows;
+            } catch (error) {
+                if (!quiet) showToast(error.message || String(error), "error");
+                return { error: error.message || String(error) };
+            }
+        }
+
+        async function adminCopy(text) {
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        async function adminRefreshCodes(quiet = true) {
+            const rows = await adminList("codes", quiet);
+            adminFill("adminCodesBody", "adminCodesEmpty", Array.isArray(rows) ? rows : [],
+                Array.isArray(rows) ? "No codes yet." : rows.error, (row) => {
+                    const tr = document.createElement("tr");
+                    const actions = adminCell("", "actions");
+                    actions.append(
+                        adminButton("Copy", "secondary", async () => {
+                            showToast(await adminCopy(row.code) ? "Code copied." : "Could not copy the code.", "info");
+                        }),
+                        adminButton("Remove", "danger", async () => {
+                            if (!confirm(`Remove the code ${row.code}?`)) return;
+                            await adminAction("remove-code", [row.code], { refresh: [adminRefreshCodes] });
+                        })
+                    );
+                    tr.append(adminCell(row.code, "mono"), adminCell(row.bp), adminCell(row.used), actions);
+                    return tr;
+                });
+        }
+
+        function adminPositiveInt(id, label, required) {
+            const raw = value(id);
+            if (!raw) {
+                if (required) showToast(`Enter ${label}.`, "error");
+                return required ? null : "";
+            }
+            if (!/^[0-9]+$/.test(raw) || parseInt(raw, 10) < 1) {
+                showToast(`${label} must be a whole number of at least 1.`, "error");
+                return null;
+            }
+            return raw;
+        }
+
+        byId("adminCodesRefreshButton")?.addEventListener("click", () => adminRefreshCodes(false));
+
+        byId("adminCodeCreateButton")?.addEventListener("click", async () => {
+            const bp = adminPositiveInt("adminCodeBp", "the BP the code gives", true);
+            if (bp === null) return;
+            const uses = adminPositiveInt("adminCodeUses", "the number of players", false);
+            if (uses === null) return;
+            const custom = value("adminCodeCustom").toUpperCase();
+            if (custom && !/^[A-Z0-9]{16}$/.test(custom)) {
+                showToast("A code is exactly 16 letters and digits.", "error");
+                return;
+            }
+            const args = custom ? [custom, bp] : [bp];
+            if (uses) args.push(uses);
+            const result = await adminAction(custom ? "add-code" : "new-code", args,
+                { refresh: [adminRefreshCodes], clear: ["adminCodeCustom"], toast: false });
+            if (!result) return;
+            const code = String(result.message).split("\t")[0];
+            const copied = await adminCopy(code);
+            showToast(`Code ${code} created${copied ? " and copied" : ""}.`, "success");
+        });
+
+        byId("adminSayButton")?.addEventListener("click", async () => {
+            const text = value("adminSayText");
+            if (!text) {
+                showToast("Enter the line to send.", "error");
+                return;
+            }
+            await adminAction("say", [text], { clear: ["adminSayText"] });
+        });
+
+        byId("adminNewsSetButton")?.addEventListener("click", async () => {
+            const title = value("adminNewsTitle");
+            const body = value("adminNewsBody");
+            if (!title || !body) {
+                showToast("Enter both a news title and text.", "error");
+                return;
+            }
+            await adminAction("news", [title, body]);
+        });
+
+        byId("adminNewsClearButton")?.addEventListener("click", () => adminAction("news-clear", []));
+
+        byId("adminMaintStartButton")?.addEventListener("click", async () => {
+            const minutes = adminPositiveInt("adminMaintMinutes", "the minutes until maintenance", true);
+            if (minutes === null) return;
+            const message = value("adminMaintMessage");
+            await adminAction("maintenance", [minutes, ...(message ? [message] : [])]);
+        });
+
+        byId("adminMaintStopButton")?.addEventListener("click", () => adminAction("maintenance-off", []));
 
         window.addEventListener("DOMContentLoaded", async () => {
             if (typeof lucide !== "undefined") {
@@ -2718,21 +3962,34 @@
             window.setInterval(refreshServerStatus, 3000);
         });
     </script>
-
     <script>
         document.addEventListener("contextmenu", function (e) {
             e.preventDefault();
         });
 
         document.addEventListener("keydown", function (e) {
+            const key = e.key.toLowerCase();
+            const isZoomKey =
+                ["+", "-", "=", "0"].includes(e.key) ||
+                ["add", "subtract", "decimal"].includes(key);
+
             if (
+                e.key === "F5" ||
                 e.key === "F12" ||
-                (e.ctrlKey && e.key.toLowerCase() === "u") ||
-                (e.ctrlKey && e.shiftKey && ["i", "j", "c"].includes(e.key.toLowerCase()))
+                (e.ctrlKey && key === "u") ||
+                (e.ctrlKey && e.shiftKey && ["i", "j", "c"].includes(key)) ||
+                (e.ctrlKey && isZoomKey)
             ) {
                 e.preventDefault();
             }
         });
+
+        // Optional: also block Ctrl + mouse wheel zoom
+        document.addEventListener("wheel", function (e) {
+            if (e.ctrlKey) {
+                e.preventDefault();
+            }
+        }, { passive: false });
     </script>
 </body>
 
