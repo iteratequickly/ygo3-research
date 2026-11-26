@@ -14,6 +14,8 @@
   "front_port": "1213",
   "duel_port": "1214",
   "http_port": "80",
+  "admin_host": "127.0.0.1",
+  "admin_port": "7914",
   "user_id": "1001",
   "npc_ai_enabled": "false",
   "lm_studio_url": "http://localhost:1234/v1",
