@@ -11,7 +11,7 @@ Layout of this file, top to bottom:
   7. ClientSession (front/gate requests) and DuelSession (the duel port)
   8. server start-up and the command-line tools
 
-Request ids are the client's (see protocol.md); replies and pushes use the ids named in comments.
+Request ids are the client's; replies and pushes use the ids named in comments.
 """
 
 import asyncio
@@ -36,6 +36,7 @@ import json
 import ctypes
 import re
 import secrets
+import shutil
 import sqlite3
 import threading
 import urllib.request
@@ -129,6 +130,27 @@ def config_int(name, default, env_name=None):
         return default
 
 
+def config_required(name):
+    """Read a required setting from ygo3_launcher_config.json only."""
+    if name not in config or config[name] is None or str(config[name]).strip() == "":
+        raise RuntimeError(
+            f"Missing required setting '{name}' in {CONFIG_FILE.name}. "
+            "Set it in the launcher configuration."
+        )
+    return config[name]
+
+
+def config_required_int(name):
+    """Read a required integer setting from ygo3_launcher_config.json only."""
+    value = config_required(name)
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"Invalid integer for '{name}' in {CONFIG_FILE.name}: {value!r}"
+        ) from exc
+
+
 def config_path(name, default, env_name=None):
     """Resolve a configured path relative to the server directory."""
 
@@ -187,39 +209,6 @@ GAME_DIR = config_path(
     "game_dir",
     APP_DIR,
     "YGO3_GAME_DIR",
-)
-
-
-# ---------------------------------------------------------------------------
-# Network configuration
-# ---------------------------------------------------------------------------
-
-SERVER_HOST = str(config_value("host", "0.0.0.0", "YGO3_HOST"))
-
-FRONT_ADDRESS = str(config_value("front_address", SERVER_HOST, "YGO3_FRONT_ADDRESS"))
-
-GATE_PORT = config_int(
-    "gate_port",
-    7911,
-    "YGO3_GATE_PORT",
-)
-
-FRONT_PORT = config_int(
-    "front_port",
-    7912,
-    "YGO3_FRONT_PORT",
-)
-
-DUEL_PORT = config_int(
-    "duel_port",
-    7913,
-    "YGO3_DUEL_PORT",
-)
-
-HTTP_PORT = config_int(
-    "http_port",
-    8080,
-    "YGO3_HTTP_PORT",
 )
 
 
@@ -1286,14 +1275,14 @@ class DuelDriver:
         return field_monsters(self.dll, self.handle)
 
 
-# --- Network, protocol and server settings ---------------------------------------
-# (HOST/ports, the shared Blowfish key, the login identity, event and duel announce options)
-HOST = os.getenv("YGO3_HOST", config["host"])
-FRONT_ADDRESS = config["front_address"]
-GATE_PORT = int(config["gate_port"])
-FRONT_PORT = int(config["front_port"])
-DUEL_PORT = int(config["duel_port"])
-HTTP_PORT = int(os.getenv("YGO3_HTTP_PORT", config["http_port"]))
+# --- Protocol and server settings -----------------------------------------------
+# All network addresses and ports are supplied by ygo3_launcher_config.json.
+HOST = str(config_required("host"))
+FRONT_ADDRESS = str(config_required("front_address"))
+GATE_PORT = config_required_int("gate_port")
+FRONT_PORT = config_required_int("front_port")
+DUEL_PORT = config_required_int("duel_port")
+HTTP_PORT = config_required_int("http_port")
 
 KEY = b"12345678"
 LENGTH_MASK = 0x77777777
@@ -1672,6 +1661,16 @@ class CardDatabase:
                 "SELECT id, alias, setcode, type, atk, def, level, race, attribute FROM datas WHERE id = ?",
                 (int(code),),
             ).fetchone()
+
+    def card_string(self, code: int, index: int) -> str:
+        """The card's own string `index` (0-15: the `n` of EDOPro's code << 20 | n, in str1..str16), or ''."""
+        if not 0 <= int(index) < 16:
+            return ""
+        with self.lock:
+            row = self.connection.execute(
+                f"SELECT str{int(index) + 1} FROM texts WHERE id = ?", (int(code),)
+            ).fetchone()
+        return str(row[0] or "") if row else ""
 
     # Lower-cases and strips punctuation so names compare loosely.
     @staticmethod
@@ -2411,6 +2410,7 @@ class DuelManager:
                 "decks": (converted1, converted2),
                 "original_decks": (original_deck1, original_deck2),
                 "original_deck_rows": (original_rows1, original_rows2),
+                "recording_events": [],
                 "native": native,
                 "started": True,
                 "ocg_status": status,
@@ -3322,6 +3322,7 @@ class ServerState:
         self.events = []
         self.online = {}
         self.ratings = {}
+        self.duel_records = []
 
         self.next_mail_id = 1
         self.next_team_id = 1
@@ -3333,6 +3334,12 @@ class ServerState:
         self.rentals = []
         self.next_rental_id = 1
         self.user_events = {}
+
+        # Persistent: the host's BOOSTERPASS codes {CODE: {...}}, the mutes {player_id: {"until", "reason"}}
+        # and the login news the host set live (None until set; then a list of (title, body)).
+        self.bp_codes = {}
+        self.mutes = {}
+        self.news = None
 
         # Transient (never saved, they die with the connections):
         # pending team invitations {invitee: inviter}, pending trade and
@@ -3367,12 +3374,16 @@ class ServerState:
             "player_teams": self.player_teams,
             "events": self.events,
             "ratings": self.ratings,
+            "duel_records": self.duel_records[-500:],
             "next_mail_id": self.next_mail_id,
             "next_team_id": self.next_team_id,
             "next_event_id": self.next_event_id,
             "next_message_id": self.next_message_id,
             "rentals": self.rentals,
             "next_rental_id": self.next_rental_id,
+            "bp_codes": self.bp_codes,
+            "mutes": self.mutes,
+            "news": self.news,
             # Only the open events survive; their runtime part is dropped.
             "user_events": {
                 event_id: {k: v for k, v in event.items() if k != "run"}
@@ -3760,6 +3771,68 @@ async def rental_ticker():
             tick_rentals()
         except Exception:
             log.exception("[Rental] Could not check the rental terms")
+
+
+async def maintenance_ticker():
+    """Refreshes the in-game maintenance countdown when its displayed minute changes."""
+    last_minute = None
+    while True:
+        await asyncio.sleep(1)
+        try:
+            left = maintenance_in()
+            # The client receives `lefttime` in seconds but does not continuously
+            # advance the displayed value itself. Re-send the Information list at
+            # each minute boundary so players already online see it count down.
+            minute = (left + 59) // 60 if left is not None else None
+            if minute != last_minute:
+                if last_minute is not None or minute is not None:
+                    push_information()
+                last_minute = minute
+        except Exception:
+            log.exception("[Maintenance] Could not refresh the countdown")
+
+
+def return_rental(rental_id, player_id, now=None):
+    """The borrower gives a running rental back before its term: it ends now, as at its term (both confirm flags
+    at 1) and both sides get their records again. False when it is not theirs or is over.
+    """
+    now = int(time.time()) if now is None else int(now)
+    for rental in STATE.rentals:
+        if (
+            rental.get("rental_id") != rental_id
+            or rental["to_id"] != player_id
+            or not rental_active(rental)
+        ):
+            continue
+        old = (
+            rental["confirm_from"],
+            rental["confirm_to"],
+            rental["end_ts"],
+            rental["rent_end"],
+        )
+        rental["confirm_from"] = rental["confirm_to"] = 1
+        rental["end_ts"] = min(rental["end_ts"], now)
+        rental["rent_end"] = datetime.fromtimestamp(rental["end_ts"], JST).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        try:
+            STATE.save()
+        except Exception:
+            (
+                rental["confirm_from"],
+                rental["confirm_to"],
+                rental["end_ts"],
+                rental["rent_end"],
+            ) = old
+            log.exception(
+                "[Rental] Could not save the early return of rental %s", rental_id
+            )
+            return False
+        log.info("[Rental] Rental %s returned early by its borrower", rental_id)
+        for who in {rental["from_id"], rental["to_id"]} - {0}:
+            push_rentals(who)
+        return True
+    return False
 
 
 # ===========================================================================
@@ -5491,6 +5564,30 @@ class ClientSession:
 
         await self.send_message(0x23F0, fields=premium_fields(bp))
 
+    # 0x20D0 {dpcode} -> 0x23F0: the BOOSTERPASS window. A code the host made gives its BP (dpauth_result 0 adds
+    # dpGetPoints to the shown BP); anything else is "Incorrect BOOSTERPASS CODE." (dpauth_result 1).
+    async def redeem_code(self, code):
+        code = code if isinstance(code, str) else ""
+        try:
+            got, total = redeem_bp_code(self.account, self.selected_player, code)
+        except ValueError as exc:
+            log.info(
+                "[Front] BOOSTERPASS code refused for player %r: %s",
+                self.selected_player,
+                exc,
+            )
+            refused = premium_fields(self.account.duel_points)
+            refused["dpauth_result"] = 1
+            await self.send_message(0x23F0, fields=refused)
+            return
+        log.info(
+            "[Front] Player %r redeemed a BOOSTERPASS code: %d BP, %d now",
+            self.selected_player,
+            got,
+            total,
+        )
+        await self.send_message(0x23F0, fields=premium_fields(total, got))
+
     # 0x1C22: the booster-pack shelf.
     async def send_pack_shelf(self):
         # Booster packs only: pack files 264-268 are Blister's exchange pools and 10000 the rental pool, which
@@ -5598,7 +5695,6 @@ class ClientSession:
         await self.send_message(0x1C2E, items=[])
 
     # Dispatches one front request by id; the numbers are the client's request ids (see
-    # protocol.md).
     async def handle_front(self, request_id, message):
         fields = message.get("fields", {})
         items = message.get("items", [])
@@ -5800,15 +5896,8 @@ class ClientSession:
         if request_id == 0x1F41:
             # item[0] {lang} whose items are {starttime (JST), title, body}: what the world menu's
             # information window lists (InfoWindow 0x458410).
-            now = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
-            entries = [
-                MessageRecord(fields={"starttime": now, "title": title, "body": body})
-                for title, body in WELCOME_NEWS
-            ]
-            await self.send_message(
-                0x21FC,
-                items=[MessageRecord(fields={"lang": "1"}, items=entries)],
-            )
+            # (the news and, while one is planned, the maintenance countdown: see information_items)
+            await self.send_message(0x21FC, items=information_items())
             return
 
         if request_id in (0x24B8, 0x24C1):
@@ -5922,6 +6011,7 @@ class ClientSession:
             0x2C33: lambda: self.scene_leave("rental"),
             0x2C34: lambda: self.rental_records(),
             0x2C35: lambda: self.rental_history(fields),
+            0x7A14: lambda: self.rental_return(fields),
             0x2D6C: lambda: self.rental_records(),
             # --- teams ---
             0x2AF9: lambda: self.team_form(fields),
@@ -5993,9 +6083,12 @@ class ClientSession:
             fields,
         )
 
-        # 0x20D0 Duel Points balance
+        # 0x20D0 BOOSTERPASS window: {dpcode} is a code to redeem; without one, the Duel Points balance
         if request_id == 0x20D0:
-            await self.send_bp_balance()
+            if "dpcode" in fields:
+                await self.redeem_code(fields.get("dpcode"))
+            else:
+                await self.send_bp_balance()
             return
 
         # 0x17FC Duel Menu counts
@@ -6254,6 +6347,7 @@ class ClientSession:
         except (
             asyncio.TimeoutError,
             asyncio.IncompleteReadError,
+            ConnectionError,
         ):
             log.info(
                 "[%s] Disconnected or timed out",
@@ -6805,6 +6899,11 @@ class ClientSession:
         if sender is None:
             return
 
+        # A mute covers D-Mail too: "a transmission error", as the game has no text for a mute.
+        if mute_of(self.selected_player) is not None:
+            await self.send_message(0x2585, {"error_code": 700})
+            return
+
         mail_type = as_int(fields.get("mail_type"))
         title = fields.get("title", "")
         body = fields.get("body", "")
@@ -6899,6 +6998,13 @@ class ClientSession:
         to_id (room id / team id) or to_name (whisper)."""
         sender = self.player()
         if sender is None:
+            return
+
+        # A muted player's lines go nowhere; they are told why in their own chat window.
+        mute = mute_of(self.selected_player)
+        if mute is not None:
+            await self.send_message(0x2456)
+            await self.send_message(0x2455, items=[chat_note(mute_notice(mute))])
             return
 
         data = dict(message.get("fields", {}))
@@ -7586,6 +7692,12 @@ class ClientSession:
             for player_id in (lender, me):
                 push_rentals(player_id)
 
+    async def rental_return(self, fields):
+        """0x7A14 {rental_id} (the borrower's Return button, which a connection DLL adds to the Rental Card List):
+        the rental ends now and both players get the records again (0x2D6C). No reply of its own.
+        """
+        return_rental(as_int(fields.get("rental_id")), self.selected_player)
+
     async def rental_records(self):
         """0x2C34 (Rental Card List) -> 0x2D6C: the player's running rentals."""
         await self.send_message(
@@ -8054,15 +8166,9 @@ NPC_NAME_TEXT = 0x5208
 BANTER_GAP = 1.5  # minimum spacing between LLM announcements, in seconds
 
 
-# The information window's announcements (title, body). YGO3_WELCOME_MESSAGE replaces the text.
-WELCOME_NEWS = [
-    (
-        "Announcement",
-        os.getenv(
-            "YGO3_WELCOME_MESSAGE", "Welcome to the ygo3-research private server!"
-        ),
-    )
-]
+# The fixed login server message is always first. Host/GUI news is appended after it.
+LOGIN_SERVER_MESSAGE = "Welcome to the ygo3-research private server!"
+WELCOME_NEWS = [("Announcement", LOGIN_SERVER_MESSAGE)]
 # Life Point changes with their number, sound and the avatar's line; YGO3_LP_ANIMATION=0 sends the plain change.
 LP_ANIMATION = os.getenv("YGO3_LP_ANIMATION", "1") not in ("0", "false", "no")
 # The one LM Studio prompt: LM_DUEL_ROLE, then the duel (state and legal actions), then LM_DUEL_RULES.
@@ -8547,6 +8653,151 @@ FIELD_BACKGROUND = os.getenv("YGO3_FIELD_BACKGROUND", "1") not in ("0", "false",
 CMD_FIELD_CHANGE = 7
 FIELD_SPELL_ZONE = 10
 
+# The client's own attack target is picked on the field with the cursor, as in the game (Konami's server sent the
+# attack, then a command map with a Confirm on each target; a right-click takes the attack back). The engine's
+# card list of the targets stays for effects that pick a card. YGO3_FIELD_ATTACK_TARGET=0 brings the list back.
+FIELD_ATTACK_TARGET = os.getenv("YGO3_FIELD_ATTACK_TARGET", "1") not in (
+    "0",
+    "false",
+    "no",
+)
+HINT_ATTACK_TARGET = 549
+CMD_BATTLE_INIT, CMD_BATTLE_SELECT, CMD_BATTLE_ATTACK, CMD_BATTLE_END = (
+    0x0A,
+    0x0B,
+    0x0C,
+    0x0E,
+)
+CMD_COMMAND_MODE, MODE_BATTLE = 4, 3
+MENU_CONFIRM, FLAG_RIGHT_CLICK = 11, 6
+
+# Option labels of the duel prompt table for EDOPro's system strings, with the list's title: heads and tails (60, 61)
+# under "Coin Toss Selection:", the declared card types (70-72) under "Select card type.".
+OPTION_SYSTEM_LABELS = {
+    60: (400, 56),
+    61: (401, 56),
+    70: (440, 260),
+    71: (441, 260),
+    72: (442, 260),
+}
+OPTION_LIST_FLAG = 0x8000  # a label that is a prompt table text
+TEXT_SELECT_EFFECT = 276  # "Select effect to activate."
+# Labels for options that are a card's own strings (EDOPro's descriptions: code << 20 | n). The client has them only
+# for these cards (the card-option table, with pairs matched by hand); any other card's
+# options are shown as a card list with their words in the chat.
+CARD_OPTION_LABELS = {
+    (967928 << 20 | 0): 465,
+    (967928 << 20 | 1): 466,
+    (1804528 << 20 | 1): 426,
+    (1804528 << 20 | 2): 427,
+    (5817857 << 20 | 0): 492,
+    (5817857 << 20 | 1): 493,
+    (5817857 << 20 | 2): 427,
+    (8842266 << 20 | 0): 406,
+    (8842266 << 20 | 1): 420,
+    (10032958 << 20 | 1): 462,
+    (10032958 << 20 | 2): 463,
+    (10032958 << 20 | 3): 464,
+    (10060427 << 20 | 0): 492,
+    (10060427 << 20 | 1): 493,
+    (10060427 << 20 | 2): 427,
+    (12183332 << 20 | 1): 424,
+    (12183332 << 20 | 2): 425,
+    (12435193 << 20 | 0): 492,
+    (12435193 << 20 | 1): 493,
+    (12435193 << 20 | 2): 427,
+    (15552258 << 20 | 0): 489,
+    (15552258 << 20 | 1): 490,
+    (19642889 << 20 | 0): 492,
+    (19642889 << 20 | 1): 493,
+    (19642889 << 20 | 2): 427,
+    (20065322 << 20 | 0): 471,
+    (20065322 << 20 | 1): 478,
+    (21496848 << 20 | 1): 440,
+    (21496848 << 20 | 2): 441,
+    (21496848 << 20 | 3): 442,
+    (24673894 << 20 | 0): 406,
+    (24673894 << 20 | 1): 420,
+    (29424328 << 20 | 1): 438,
+    (29424328 << 20 | 2): 439,
+    (30461781 << 20 | 0): 448,
+    (30461781 << 20 | 1): 449,
+    (30936186 << 20 | 0): 492,
+    (30936186 << 20 | 1): 493,
+    (30936186 << 20 | 2): 427,
+    (32314730 << 20 | 0): 492,
+    (32314730 << 20 | 1): 493,
+    (32314730 << 20 | 2): 427,
+    (32588805 << 20 | 1): 441,
+    (32588805 << 20 | 2): 442,
+    (33970665 << 20 | 0): 369,
+    (33970665 << 20 | 1): 370,
+    (39037517 << 20 | 0): 492,
+    (39037517 << 20 | 1): 493,
+    (39037517 << 20 | 2): 427,
+    (39238953 << 20 | 0): 471,
+    (39238953 << 20 | 1): 478,
+    (40695128 << 20 | 2): 438,
+    (40695128 << 20 | 3): 439,
+    (41201555 << 20 | 0): 492,
+    (41201555 << 20 | 1): 493,
+    (41201555 << 20 | 2): 427,
+    (41858121 << 20 | 0): 448,
+    (41858121 << 20 | 1): 486,
+    (45041488 << 20 | 0): 492,
+    (45041488 << 20 | 1): 493,
+    (45041488 << 20 | 2): 427,
+    (48576971 << 20 | 1): 448,
+    (48576971 << 20 | 2): 422,
+    (49680980 << 20 | 0): 492,
+    (49680980 << 20 | 1): 493,
+    (49680980 << 20 | 2): 427,
+    (53839837 << 20 | 1): 440,
+    (53839837 << 20 | 2): 441,
+    (53839837 << 20 | 3): 442,
+    (54289683 << 20 | 1): 467,
+    (54289683 << 20 | 2): 468,
+    (54289683 << 20 | 3): 469,
+    (54520292 << 20 | 0): 492,
+    (54520292 << 20 | 1): 493,
+    (54520292 << 20 | 2): 427,
+    (58074572 << 20 | 0): 406,
+    (58074572 << 20 | 1): 407,
+    (61587183 << 20 | 3): 438,
+    (61587183 << 20 | 4): 439,
+    (65026212 << 20 | 0): 492,
+    (65026212 << 20 | 2): 427,
+    (66816282 << 20 | 0): 492,
+    (66816282 << 20 | 1): 493,
+    (66816282 << 20 | 2): 427,
+    (68809475 << 20 | 0): 492,
+    (68809475 << 20 | 1): 493,
+    (68809475 << 20 | 2): 427,
+    (74576482 << 20 | 0): 492,
+    (74576482 << 20 | 1): 493,
+    (74576482 << 20 | 2): 427,
+    (76614003 << 20 | 1): 438,
+    (76614003 << 20 | 2): 439,
+    (80367387 << 20 | 0): 492,
+    (80367387 << 20 | 1): 493,
+    (80367387 << 20 | 2): 427,
+    (80925836 << 20 | 0): 492,
+    (80925836 << 20 | 1): 493,
+    (80925836 << 20 | 2): 427,
+    (82012319 << 20 | 1): 369,
+    (82012319 << 20 | 2): 370,
+    (86198326 << 20 | 0): 408,
+    (86198326 << 20 | 1): 409,
+    (93130021 << 20 | 1): 467,
+    (93130021 << 20 | 2): 468,
+    (93130021 << 20 | 3): 469,
+    (95090813 << 20 | 0): 492,
+    (95090813 << 20 | 1): 493,
+    (95090813 << 20 | 2): 427,
+    (96565487 << 20 | 1): 438,
+    (96565487 << 20 | 2): 439,
+}
+
 
 class DuelSession:
     # Binds the stream and the per-duel mirror of the board.
@@ -8585,6 +8836,23 @@ class DuelSession:
         self.turn_order = None
         self.pending_list_indices = []
         self.pending_list_prompt = None
+        self._list_args = (
+            None  # the last card list's arguments, to ask a forced choice again
+        )
+        self._option_list = False  # the open card list is a SELECT_OPTION's
+        self._attacker = (
+            None  # the client's attacker (player, zone) of its last attack command
+        )
+        self._taken_back = False  # an attack was taken back: the next command prompt starts with BattleEnd
+        self._recent_commands = (
+            []
+        )  # the last engine commands sent, for the log when the client drops
+        self._reserved_token = (
+            None  # (code, uid, row) of a token the client was shown before it arrives
+        )
+        self._card_origin = (
+            {}
+        )  # uid -> (team, zone, index, row) of a deck or Extra Deck card as the client table holds it
         self.team_to_client = {0: 0, 1: 1}
         self.uid_by_team_code = {0: {}, 1: {}}
         self.extra_pool = {0: {}, 1: {}}
@@ -8621,6 +8889,8 @@ class DuelSession:
             "param3": int(params[2]),
             "param4": int(params[3]),
         }
+        self._recent_commands.append((int(command_id), tuple(int(p) for p in params)))
+        del self._recent_commands[:-60]
         await self.send_message(YGO3_SERVER_DUEL, fields)
 
     # Restarts the turn clock.
@@ -8815,6 +9085,11 @@ class DuelSession:
                             self.card_locations[(team, zone, index)][0]
                         ] = code
 
+        self._card_origin = {
+            entry[0]: (key[0], key[1], key[2], entry[1])
+            for key, entry in self.card_locations.items()
+            if key[1] in (0x0C, 0x0D)
+        }
         await self.send_engine_command(1, [0, 0, 0, 0])
         await self.send_engine_command(0x0F, [0, 8000, 0, 0])
         await self.send_engine_command(0x0F, [1, 8000, 0, 0])
@@ -9406,6 +9681,39 @@ class DuelSession:
                     return e[0], e[1]
         return None
 
+    def _find_hidden(self, uid):
+        """(team, zone, index, row) of a card as the client table holds it: in a hand or on a field, or where it started
+        in the Deck or Extra Deck. None when it is in a pile (the client has those open) or unknown.
+        """
+        for team, hand in self.m_hand.items():
+            for index, entry in enumerate(hand):
+                if entry[0] == uid:
+                    return team, 0x0B, index, entry[1]
+        for (team, loc, seq), entry in self.m_field.items():
+            if entry[0] == uid:
+                return team, self._zone(loc, seq), 0, entry[1]
+        for pile in self.m_pile.values():
+            if any(entry[0] == uid for entry in pile):
+                return None
+        return self._card_origin.get(uid)
+
+    async def _reveal(self, uid):
+        """The CPU's card as the client's table must hold it before an animation names it (#79). The client holds the
+        opponent's hidden cards without a picture (row 0) and draws an animation's card from its table, so a Fusion
+        or Synchro Summon showed only the light and an opponent's activation from the hand showed no card. Its table
+        entry is sent again with the real row first. A card of the client's own side needs nothing.
+        """
+        found = self._find_hidden(uid)
+        if found is None:
+            return
+        team, zone, index, row = found
+        player = self._cp(team)
+        if player != 1 or not row:
+            return
+        await self.send_engine_command(
+            1000, [uid, row, self._cid(row), self._table_place(player, zone, index)]
+        )
+
     async def _summon_before_move(self, msg):
         """Before a MOVE: a Tribute, Fusion or Synchro Summon's commands. The first material's move marks every
         material of the summon that moves in this batch; each plays its effect before its own move, except a
@@ -9449,6 +9757,8 @@ class DuelSession:
                 if uid == here[0]:
                     del s["played"][i]
                     if run:
+                        # An earlier material leaving the hand renumbered this one and hid it again.
+                        await self._reveal(uid)
                         await self.send_engine_command(run[0], run[1])
                     self._summoning = s
                     return
@@ -9489,6 +9799,8 @@ class DuelSession:
             "synchro": (CMD_TUNING_SET, CMD_TUNING_RUN),
         }.get(family)
         runs = []
+        for uid, row, player, zone, tuner in materials:
+            await self._reveal(uid)
         for uid, row, player, zone, tuner in materials:
             if marks:
                 await self.send_engine_command(marks[0], [player, zone, uid, 0])
@@ -9535,6 +9847,9 @@ class DuelSession:
             s["family"], (0, SUMMON_EXTRA)
         )
         uids = s["uids"]
+        await self._reveal(uid)
+        for material in uids:
+            await self._reveal(material)
         at = lambda seq, i: seq[i] if i < len(seq) else 0
         await self.send_engine_command(
             CMD_MATERIAL_LIST, [len(uids), at(uids, 0), at(uids, 1), at(uids, 2)]
@@ -9569,9 +9884,15 @@ class DuelSession:
 
         if s_loc == 0:
 
-            uid = self.next_token_uid
-            self.next_token_uid += 1
-            row = 3902
+            reserved = self._reserved_token
+            if reserved and reserved[0] == code:
+                # The token the client was asked a position for (see _reserve_token).
+                _code, uid, row = reserved
+                self._reserved_token = None
+            else:
+                uid = self.next_token_uid
+                self.next_token_uid += 1
+                row = 3902
             self.uid_to_code[uid] = code
             taken = (uid, row, d_pos, 0)
             s_zone_hint = None
@@ -10033,13 +10354,21 @@ class DuelSession:
             link_player = self._cp(msg.get("controller", 0))
             # CardActivate: the card's activation effect by its type, before the ChainSet (Konami's server
             # sent it for every Spell/Trap activation). Its place is face up, as moves give it.
-            if loc in (LOC_MZONE, LOC_SZONE) and zone <= 10:
+            if (loc in (LOC_MZONE, LOC_SZONE) and zone <= 10) or loc in (
+                LOC_HAND,
+                LOC_GRAVE,
+                LOC_REMOVED,
+                LOC_DECK,
+            ):
                 found = self._lookup(
                     msg.get("controller", 0),
                     loc,
                     msg.get("sequence", 0),
                     msg.get("code", 0),
                 )
+                if found and loc in (LOC_HAND, LOC_DECK):
+                    # The CPU's card is held without its picture: shown before its line and its effect (#79).
+                    await self._reveal(found[0])
                 if found and SUMMON_ANIMATIONS:
                     # The activation line: a Spell/Trap says 2 then 3 (as from the hand, since a Set card is
                     # face up by its MSG_CHAINING), a monster 4.
@@ -10058,7 +10387,12 @@ class DuelSession:
                     await self.send_engine_command(
                         0x22,
                         [
-                            self._place_word(link_player, zone, 0, POS_FACEUP_ATTACK),
+                            self._place_word(
+                                link_player,
+                                zone,
+                                0 if zone <= 10 else int(msg.get("sequence", 0)),
+                                POS_FACEUP_ATTACK,
+                            ),
                             self._cid(found[1]),
                             found[0],
                             0,
@@ -10225,6 +10559,42 @@ class DuelSession:
             reason,
         )
         await self.send_engine_command(2, [result, reason, 0, 0])
+        found_duel = (
+            DUEL_MANAGER.find_duel_for_player(self.player_id) if DUEL_MANAGER else None
+        )
+        if found_duel is not None:
+            duel_id, duel = found_duel
+            if not duel.get("recording_saved"):
+                duel["recording_saved"] = True
+                first, second = duel.get("players", (self.player_id, 0))
+                opponent = second if self.player_id == first else first
+                winner = (
+                    self.player_id
+                    if result == 1
+                    else (opponent if result == 2 else None)
+                )
+                STATE.duel_records.append(
+                    {
+                        "id": str(duel_id),
+                        "date": datetime.now(timezone.utc).strftime(
+                            "%Y-%m-%d %H:%M:%S UTC"
+                        ),
+                        "player_1_id": int(first),
+                        "player_2_id": int(second),
+                        "player_1_name": _public_player_name(first),
+                        "player_2_name": _public_player_name(second),
+                        "winner_id": winner,
+                        "result": (
+                            "Draw"
+                            if winner is None
+                            else ("Player 1 win" if winner == first else "Player 2 win")
+                        ),
+                        "reason": int(reason),
+                        "npc": duel.get("npc_player_id") is not None,
+                        "events": list(duel.get("recording_events", []))[-3000:],
+                    }
+                )
+                STATE.duel_records = STATE.duel_records[-500:]
         record = STATE.player(self.player_id)
         if record is not None:
             record["n_duelall"] = int(record.get("n_duelall", 0)) + 1
@@ -10347,8 +10717,185 @@ class DuelSession:
             return self._table_place(player, 0, seq)
         return self._table_place(player, self._zone(loc, seq), 0)
 
+    async def _send_field_target(self, duel, prompt):
+        """The client's attack target as the game asks it: the attack on its attacker, then a command map with a
+        Confirm on each target's monster zone, in battle mode. False when the targets can't be picked on the field
+        (the caller shows the card list)."""
+        attacker = self._attacker
+        targets = prompt.get("selects", [])
+        if not FIELD_ATTACK_TARGET or attacker is None or not targets:
+            return False
+        if any(int(card.get("location", 0)) != LOC_MZONE for card in targets):
+            return False
+        player, zone = attacker
+        places = sorted({self._cmd_place(card) for card in targets})
+        raw = bytearray()
+        for place in places:
+            raw.extend(struct.pack(">II", place, 1 << MENU_CONFIRM))
+        raw.extend(struct.pack("BB", FLAG_RIGHT_CLICK, 1))
+        await self.send_engine_command(CMD_BATTLE_INIT, [0, 0, 0, 0])
+        await self.send_engine_command(
+            CMD_BATTLE_ATTACK, [player | (zone << 8), 1 - player, 0xFFFFFFFF, 0]
+        )
+        await self.send_engine_command(CMD_BATTLE_SELECT, [0, 0, 0, 0])
+        await self.send_message(
+            YGO3_SERVER_DUEL,
+            {
+                "duelRequestName": 0x12,
+                "comIDsize": len(places),
+                "helpIDsize": 0,
+                "otherFlagSize": 1,
+                "COMIDDATA": bytes(raw),
+            },
+        )
+        await self.send_engine_command(CMD_COMMAND_MODE, [MODE_BATTLE, 0, 0, 0])
+        duel["field_target"] = True
+        return True
+
+    async def _reserve_token(self, team, code):
+        """A uid for a token the client is about to be asked a position for: the table entry (the token's row) at a
+        free monster zone of the player's side, and the same uid for the token's arrival (see _on_move).
+        """
+        reserved = self._reserved_token
+        if reserved and reserved[0] == code:
+            _code, uid, row = reserved
+        else:
+            uid, row = self.next_token_uid, 3902
+            self.next_token_uid += 1
+            self.uid_to_code[uid] = code
+            self._reserved_token = (code, uid, row)
+        zone = next(
+            (z for z in range(5) if (team, LOC_MZONE, z) not in self.m_field), 0
+        )
+        log.info("[Duel] SELECT_POSITION: token %s shown as uid %s", code, uid)
+        await self.send_engine_command(
+            1000,
+            [
+                uid,
+                row,
+                0,
+                self._table_place(self._cp(team), self._zone(LOC_MZONE, zone), 0),
+            ],
+        )
+        return uid
+
+    async def _field_target_click(self, duel_id, duel, prompt, command, zone, index):
+        """A click while the attack target is picked on the field: Confirm on one of the targets answers the
+        engine; anything else is left waiting."""
+        if command != MENU_CONFIRM:
+            return
+        location, sequence = self._menu_place(zone, index)
+        team = self._team(int(self._field_target_player))
+        if location != LOC_MZONE:
+            return
+        for i, card in enumerate(prompt.get("selects", [])):
+            if (
+                int(card.get("controller", -1)) == team
+                and int(card.get("location", 0)) == LOC_MZONE
+                and int(card.get("sequence", -1)) == sequence
+            ):
+                duel.pop("field_target", None)
+                await self._advance_core(duel_id, duel, resp_cards([i]))
+                return
+        log.info(
+            "[Duel] Attack target click at zone %s index %s is not a target",
+            zone,
+            index,
+        )
+
+    async def _field_target_cancel(self, duel_id, duel, prompt):
+        """A right-click while the attack target is picked: the attack is taken back when the engine allows it."""
+        if not (prompt or {}).get("can_cancel"):
+            return
+        duel.pop("field_target", None)
+        self._taken_back = True
+        await self._advance_core(duel_id, duel, resp_cards(None))
+
+    def _option_source(self, code):
+        """The card whose strings an option is, as a card list entry, wherever the mirror has it; None if nowhere."""
+        code = int(code)
+        for (team, loc, seq), entry in self.m_field.items():
+            if self.uid_to_code.get(entry[0]) == code:
+                return {
+                    "code": code,
+                    "controller": team,
+                    "location": loc,
+                    "sequence": seq,
+                }
+        for team, hand in self.m_hand.items():
+            for i, entry in enumerate(hand):
+                if self.uid_to_code.get(entry[0]) == code:
+                    return {
+                        "code": code,
+                        "controller": team,
+                        "location": LOC_HAND,
+                        "sequence": i,
+                    }
+        for (team, loc), pile in self.m_pile.items():
+            for i, entry in enumerate(pile):
+                if self.uid_to_code.get(entry[0]) == code:
+                    return {
+                        "code": code,
+                        "controller": team,
+                        "location": loc,
+                        "sequence": i,
+                    }
+        return None
+
+    @staticmethod
+    def _option_label(description):
+        """(label, title) the client has for an option: a system string or one of the 44 cards' own strings."""
+        return OPTION_SYSTEM_LABELS.get(description) or (
+            (CARD_OPTION_LABELS[description], TEXT_SELECT_EFFECT)
+            if description in CARD_OPTION_LABELS
+            else None
+        )
+
+    async def _send_option_cards(self, prompt, options):
+        """Options the client has no label for: the option's card once per option as a card list (Select effect to
+        activate), with what each option does in the chat, numbered as listed."""
+        cards = []
+        for description in options:
+            source = (
+                self._option_source(description >> 20)
+                if description >= (1 << 20)
+                else None
+            )
+            if source is None:
+                log.warning("[Duel] SELECT_OPTION: no card for option %s", description)
+                return False
+            cards.append(source)
+        if not await self._send_card_list(
+            prompt,
+            cards,
+            minimum=1,
+            maximum=1,
+            can_cancel=False,
+            title=TEXT_SELECT_EFFECT,
+        ):
+            return False
+        self._option_list = True
+        for i, description in enumerate(options):
+            try:
+                words = DUEL_ENGINE.database.card_string(
+                    description >> 20, description & 0xFFFFF
+                )
+            except Exception:
+                words = ""
+            if words and self.player_id is not None:
+                STATE.online_push(
+                    self.player_id,
+                    0x2455,
+                    items=[chat_note(f"{i + 1}: {words}", "Effect")],
+                )
+        return True
+
     # Sends the menu of what the card actions the player may take.
     async def _send_command_map(self, prompt):
+        self._attacker = None
+        if self._taken_back:
+            self._taken_back = False
+            await self.send_engine_command(CMD_BATTLE_END, [0, 0, 0, 0])
         commands = {}
 
         def add(place, bit):
@@ -10449,6 +10996,14 @@ class DuelSession:
     ):
         """The client's card list (0x3EF/0x3F2/0x3F3 tables, then dialog 0x37)."""
         cards = list(cards or [])
+        self._list_args = {
+            "cards": cards,
+            "minimum": minimum,
+            "maximum": maximum,
+            "can_cancel": can_cancel,
+            "title": title,
+            "list_player": list_player,
+        }
         minimum = max(0, int(minimum))
         maximum = max(minimum, int(maximum))
         maximum = min(maximum, len(cards))
@@ -10494,14 +11049,23 @@ class DuelSession:
 
     # Shows a selection dialog (cards, options, places, positions...).
     async def _send_option_dialog(self, prompt):
-        options = list(prompt.get("options", []))[:4]
+        """SELECT_OPTION: the Select dialog when the client has a label for every option (at most four), else a card
+        list of the option's card with the words in the chat. False: nothing to show, the first option answers.
+        """
+        self._option_list = False
+        options = [int(x) for x in prompt.get("options", [])]
         if not options:
             return False
-        await self.send_engine_command(1007, [len(options), 0, 0, 0])
-        batch = [int(x) & 0x7FFFFFFF for x in options]
-        await self.send_engine_command(1008, batch + [0] * (4 - len(batch)))
-        await self.send_engine_command(0x36, [4, 276, 0])
-        return True
+        found = [self._option_label(x) for x in options]
+        if len(options) <= 4 and all(found):
+            ids = [label | OPTION_LIST_FLAG for label, _title in found]
+            await self.send_engine_command(1007, [len(ids), 0, 0, 0])
+            await self.send_engine_command(1008, ids + [0] * (4 - len(ids)))
+            await self.send_engine_command(0x36, [4, found[0][1], 0])
+            return True
+        if len(options) < 2:
+            return False
+        return await self._send_option_cards(prompt, options)
 
     def _auto_places(self, prompt):
         """SELECT_PLACE / SELECT_DISFIELD: the client has no window for them, so
@@ -10536,6 +11100,47 @@ class DuelSession:
             return None
         return resp_places(legal[:count])
 
+    @staticmethod
+    def _sum_reached(prompt, chosen):
+        """Whether cards of these amounts (with the engine's `selects_must`) count to SELECT_SUM's target: exactly,
+        or with select_max at least it with no card to spare (Ritual Summons). A card's amount is its Level, or
+        two Levels (the low and high 16 bits) it may count as."""
+        values = lambda a: [v for v in (a & 0xFFFF, a >> 16) if v > 0]
+        everything = [
+            int(c.get("amount", 0)) for c in prompt.get("selects_must", [])
+        ] + list(chosen)
+        sums = {0}
+        for amount in everything:
+            vs = values(amount)
+            sums = {s + v for s in sums for v in vs} if vs else sums
+        target = int(prompt.get("amount", 0))
+        if not int(prompt.get("select_max", 0)):
+            return target in sums
+        smallest = min((min(values(a), default=0) for a in everything), default=0)
+        return any(
+            s >= target and (not everything or s - min(smallest, s) < target)
+            for s in sums
+        )
+
+    def _sum_choice(self, prompt):
+        """Indices of SELECT_SUM's `selects` that make its sum, the fewest cards first. Cards that can't make it:
+        as many as the engine allows (it refuses them, but the duel does not stop waiting).
+        """
+        selects = [int(c.get("amount", 0)) for c in prompt.get("selects", [])]
+        n = len(selects)
+        low, high = int(prompt.get("min", 0)), int(prompt.get("max", 0)) or n
+        if n <= 16:
+            for mask in sorted(range(1 << n), key=lambda k: bin(k).count("1")):
+                count = bin(mask).count("1")
+                if count < min(low, n) or count > high:
+                    continue
+                picked = [i for i in range(n) if mask >> i & 1]
+                if self._sum_reached(prompt, [selects[i] for i in picked]):
+                    log.info("[Duel] SELECT_SUM answered for the player: %s", picked)
+                    return picked
+        log.warning("[Duel] SELECT_SUM: no cards make the sum")
+        return list(range(min(n, high)))
+
     def _default_answer(self, prompt):
         """An answer for a prompt nobody is asked about (the CPU's, or one the
         client has no window for)."""
@@ -10568,6 +11173,8 @@ class DuelSession:
             return resp_position(POS_FACEUP_ATTACK)
         if t in (MSG["SORT_CARD"], MSG["SORT_CHAIN"]):
             return resp_sort(None)
+        if t == MSG["SELECT_SUM"]:
+            return resp_cards(self._sum_choice(prompt))
         if t == MSG["SELECT_COUNTER"]:
             remaining, counts = int(prompt.get("count", 0)), []
             for card in prompt.get("cards", []):
@@ -10654,9 +11261,21 @@ class DuelSession:
                     continue
                 self._cpu_tried.add(key)
                 return resp_idle(5, i)
-            if prompt.get("summons"):
+            summons = prompt.get("summons", [])
+            monster_sets = prompt.get("monster_sets", [])
+            # A Flip monster is for flipping: Set it face down (0x200000 is TYPE_FLIP) and summon any other first.
+            is_flip = lambda card: bool(
+                self._cpu_card_type(card.get("code", 0)) & 0x200000
+            )
+            for i, card in enumerate(summons):
+                if not is_flip(card):
+                    return resp_idle(0, i)
+            for i, card in enumerate(monster_sets):
+                if is_flip(card):
+                    return resp_idle(3, i)
+            if summons:
                 return resp_idle(0, 0)
-            if prompt.get("monster_sets"):
+            if monster_sets:
                 return resp_idle(3, 0)
             if prompt.get("spell_sets"):
                 return resp_idle(4, 0)
@@ -11235,6 +11854,7 @@ class DuelSession:
         window for it, else None (the client will answer)."""
         t = prompt["type"]
         self.pending_response_kind = None
+        duel.pop("field_target", None)
         if t in (MSG["SELECT_IDLECMD"], MSG["SELECT_BATTLECMD"]):
             await self._send_command_map(prompt)
         elif t == MSG["SELECT_EFFECTYN"]:
@@ -11245,6 +11865,11 @@ class DuelSession:
             await self.send_engine_command(0x36, [2, 270, 0])
         elif t == MSG["SELECT_POSITION"]:
             team = int(prompt.get("player", 0))
+            if not int(prompt.get("positions", 0)) & (
+                POS_FACEUP_ATTACK | POS_FACEDOWN_ATTACK
+            ):
+                # A choice between defense positions only has no dialog (Konami's server answered it too).
+                return self._default_answer(prompt)
             uid = 0
             for pool in (self.uid_by_team_code, self.extra_pool):
                 entries = pool.get(team, {}).get(int(prompt.get("code", 0)))
@@ -11269,7 +11894,7 @@ class DuelSession:
                         uid = entry[0]
                         break
             if not uid:
-                # Last resort: any card with this code, so the dialog is never sent for card 0.
+                # A card of this code somewhere else in the mirror (a copy in a pile), so the dialog has a card.
                 uid = next(
                     (
                         u
@@ -11278,11 +11903,11 @@ class DuelSession:
                     ),
                     0,
                 )
-                log.warning(
-                    "[Duel] SELECT_POSITION: card %s not in the mirror; using uid %s",
-                    prompt.get("code"),
-                    uid,
-                )
+            if not uid or (self._reserved_token and self._reserved_token[1] == uid):
+                # A token the effect creates is in no pile, so the client has never seen it: it is shown first, at a
+                # free monster zone, as a card the dialog can name, and arrives with the same uid. (Shown again when
+                # the dialog is asked again.)
+                uid = await self._reserve_token(team, int(prompt.get("code", 0)))
             self.pending_response_kind = "position"
             positions = int(prompt.get("positions", 0))
             flag = (1 << 16) if positions & POS_FACEUP_DEFENSE else 0
@@ -11319,6 +11944,12 @@ class DuelSession:
                 ),
                 0,
             )
+            if (
+                t == MSG["SELECT_CARD"]
+                and hint == HINT_ATTACK_TARGET
+                and await self._send_field_target(duel, prompt)
+            ):
+                return None
             if not await self._send_card_list(
                 prompt,
                 prompt.get("selects", []),
@@ -11377,6 +12008,14 @@ class DuelSession:
     async def _pump(self, duel_id, duel, events, status):
         self._banter_setup(duel)
         for _ in range(600):
+            # Keep a bounded server-side event timeline for post-duel review.
+            if events:
+                timeline = duel.setdefault("recording_events", [])
+                remaining = max(0, 3000 - len(timeline))
+                if remaining:
+                    timeline.extend(
+                        _recordable(event) for event in list(events)[:remaining]
+                    )
             auto = await self._translate(duel, events)
 
             if status == OCG_DUEL_STATUS_END:
@@ -11584,6 +12223,10 @@ class DuelSession:
         team = self._team(int(fields.get("player", 0)))
         zone, index = int(fields.get("position", 0)), int(fields.get("index", 0))
 
+        if duel.get("field_target") and ptype == MSG["SELECT_CARD"]:
+            self._field_target_player = int(fields.get("player", 0))
+            await self._field_target_click(duel_id, duel, prompt, command, zone, index)
+            return
         if ptype not in (MSG["SELECT_IDLECMD"], MSG["SELECT_BATTLECMD"]):
             log.warning(
                 "[Duel] Card command %s with no idle/battle prompt pending (%s)",
@@ -11673,6 +12316,13 @@ class DuelSession:
             )
             return
 
+        if key == "attacks":
+            attacker = listed[candidates[0]]
+            if int(attacker.get("location", 0)) == LOC_MZONE:
+                self._attacker = (
+                    self._cp(int(attacker.get("controller", team))),
+                    int(attacker.get("sequence", 0)),
+                )
         await self._advance_core(duel_id, duel, resp_idle(action, candidates[0]))
 
     # A phase-change command from the client.
@@ -11761,14 +12411,31 @@ class DuelSession:
                     )
                 )
         elif ptype == MSG["SELECT_OPTION"]:
-            response = resp_index(choice)
+            if self._option_list:
+                self._option_list = False
+                if not picks:
+                    # A forced choice closed with nothing picked is asked again.
+                    await self._prompt_again(prompt)
+                    return
+                response = resp_index(picks[0])
+            else:
+                response = resp_index(choice)
         elif ptype == MSG["SELECT_CHAIN"]:
+            if not picks and prompt.get("forced") and prompt.get("selects"):
+                await self._prompt_again(prompt)
+                return
             response = resp_chain(picks[0] if picks else None)
         elif ptype == MSG["SELECT_UNSELECT_CARD"]:
+            if not picks and not (prompt.get("can_finish") or prompt.get("can_cancel")):
+                await self._prompt_again(prompt)
+                return
             response = resp_unselect(picks[0] if picks else None)
         elif ptype in (MSG["SELECT_CARD"], MSG["SELECT_TRIBUTE"]):
             if not picks and prompt.get("can_cancel"):
                 response = resp_cards(None)
+            elif not picks and int(prompt.get("min", 1)) >= 1:
+                await self._prompt_again(prompt)
+                return
             else:
                 response = resp_cards(picks)
         else:
@@ -11778,6 +12445,27 @@ class DuelSession:
             )
             return
         await self._advance_core(duel_id, duel, response)
+
+    def _log_recent_commands(self):
+        """When the client drops mid-duel (a crash shows as a reset connection): the last engine commands sent to
+        it, to tell what it was playing."""
+        recent = self._recent_commands[-30:]
+        if recent:
+            log.info(
+                "[Duel] The last %d commands sent to the client: %s",
+                len(recent),
+                " ".join(f"{c:#x}{list(p)}" for c, p in recent),
+            )
+
+    async def _prompt_again(self, prompt):
+        """A choice the engine insists on, closed with nothing picked (right-click, Esc): its list goes again, as
+        an answer the engine can't use would only be refused."""
+        if prompt.get("type") == MSG["SELECT_OPTION"]:
+            await self._send_option_dialog(prompt)
+            return
+        args = self._list_args
+        if args:
+            await self._send_card_list(prompt, **args)
 
     # Routes a client duel command by its name id.
     async def handle_client_command(self, player_id, message, packet):
@@ -11789,6 +12477,18 @@ class DuelSession:
             return
 
         duel_id, duel = found
+        timeline = duel.setdefault("recording_events", [])
+        if len(timeline) < 3000:
+            timeline.append(
+                _recordable(
+                    {
+                        "type": "CLIENT_ACTION",
+                        "player_id": int(player_id),
+                        "command": command_name,
+                        "fields": fields,
+                    }
+                )
+            )
 
         if command_name == YGO3_SELECT_HAND:
             if not self.Roshambo_complete and isinstance(fields.get("selectHand"), int):
@@ -11820,7 +12520,9 @@ class DuelSession:
             elif command_name == 5:
 
                 prompt = duel.get("pending_prompt")
-                if prompt and prompt.get("type") in (
+                if duel.get("field_target"):
+                    await self._field_target_cancel(duel_id, duel, prompt)
+                elif prompt and prompt.get("type") in (
                     MSG["SELECT_IDLECMD"],
                     MSG["SELECT_BATTLECMD"],
                 ):
@@ -11929,8 +12631,17 @@ class DuelSession:
                 if request_id == YGO3_CLIENT_DUEL:
                     await self.handle_client_command(player_id, message, packet)
                     continue
-        except (asyncio.TimeoutError, asyncio.IncompleteReadError):
-            log.info("[Duel] Disconnected or timed out: %s", self.addr)
+        except (
+            asyncio.TimeoutError,
+            asyncio.IncompleteReadError,
+            ConnectionError,
+        ) as exc:
+            log.info(
+                "[Duel] Disconnected or timed out: %s (%s)",
+                self.addr,
+                type(exc).__name__,
+            )
+            self._log_recent_commands()
         except Exception:
             log.exception("[Duel] Session error: %s", self.addr)
         finally:
@@ -11970,6 +12681,1228 @@ async def front_client(reader, writer):
 
 
 # Writes a minimal HTTP/1.1 response.
+# ===========================================================================
+# Hosting tools: BOOSTERPASS codes, moderation (mute, kick), the game's maintenance countdown and live news, state
+# backups, the one-server-per-data-folder lock, the website pages and a local control port.
+#
+# The hosting tools below provide server administration and website support.
+# `python ygo3_server.py --admin help` lists the operations. They run on the live server through its control port
+# (127.0.0.1 only, token in data/ygo3_admin_token.txt) or, for those that only change saved data, on the state file
+# when no server is running.
+# ===========================================================================
+
+# --- BOOSTERPASS codes ------------------------------------------------------
+# The game's BOOSTERPASS window (BpInputWindow 0x40F7B0) sends 0x20D0 {dpcode}, a code of 16 letters and digits. A code
+# the host made gives its BP once per player (this server has one shared account, so "once per account" would be once
+# for everybody); a code can also be limited to a number of players. Anything else is refused ("Incorrect BOOSTERPASS
+# CODE."): the reply 0x23F0 with dpauth_result 1.
+
+BP_CODE_LENGTH = 16
+BP_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no look-alikes
+BP_LIMIT = 0xFFFFFFFF  # the client's 32-bit BP
+
+
+def bp_code_key(code):
+    """A code as it is stored and compared: trimmed, upper case."""
+    return str(code or "").strip().upper()
+
+
+def new_bp_code():
+    """A random code that fits the game's window and is not in use."""
+    while True:
+        code = "".join(secrets.choice(BP_CODE_ALPHABET) for _ in range(BP_CODE_LENGTH))
+        if code not in STATE.bp_codes:
+            return code
+
+
+def add_bp_code(code, bp, uses=None):
+    """Makes a code worth `bp`, usable by `uses` players (any number when None), each once. Raises ValueError."""
+    key = bp_code_key(code)
+    if len(key) != BP_CODE_LENGTH or not key.isascii() or not key.isalnum():
+        raise ValueError(
+            f"a code is {BP_CODE_LENGTH} letters and digits (the game's window has {BP_CODE_LENGTH} boxes)"
+        )
+    if bp < 1 or bp > BP_LIMIT:
+        raise ValueError("a code gives at least 1 BP")
+    if uses is not None and uses < 1:
+        raise ValueError("a code is for at least one player")
+    if key in STATE.bp_codes:
+        raise ValueError(f"the code {key} exists already")
+    STATE.bp_codes[key] = {
+        "code": key,
+        "bp": bp,
+        "uses": uses,
+        "used_by": [],
+        "claimed_at": {},
+    }
+    try:
+        STATE.save()
+    except Exception as exc:
+        del STATE.bp_codes[key]
+        raise ValueError(f"the change was not saved: {exc}")
+    return STATE.bp_codes[key]
+
+
+def remove_bp_code(code):
+    """Removes a code (any case). Raises ValueError when there is none."""
+    key = bp_code_key(code)
+    entry = STATE.bp_codes.pop(key, None)
+    if entry is None:
+        raise ValueError(f"no code {key}")
+    try:
+        STATE.save()
+    except Exception as exc:
+        STATE.bp_codes[key] = entry
+        raise ValueError(f"the change was not saved: {exc}")
+
+
+def redeem_bp_code(account, player_id, code):
+    """The player enters a code: its BP are added to the account. Returns (BP got, BP now); ValueError says why not."""
+    entry = STATE.bp_codes.get(bp_code_key(code))
+    if entry is None:
+        raise ValueError("no such code")
+    if player_id in entry["used_by"]:
+        raise ValueError("this player used the code already")
+    if entry["uses"] is not None and len(entry["used_by"]) >= entry["uses"]:
+        raise ValueError("the code is used up")
+    before = account.duel_points
+    got = entry["bp"]
+    account.duel_points = min(BP_LIMIT, max(0, int(before)) + got)
+    entry["used_by"].append(player_id)
+    entry["claimed_at"][player_id] = datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    try:
+        STATE.save()
+    except Exception as exc:
+        # A claim that cannot be saved is refused, not lost at the next start.
+        account.duel_points = before
+        entry["used_by"].remove(player_id)
+        entry["claimed_at"].pop(player_id, None)
+        raise ValueError(f"the claim was not saved: {exc}")
+    return account.duel_points - max(0, int(before)), account.duel_points
+
+
+# --- Moderation: mutes, host mail and chat lines from the server -------------
+
+
+def mute_of(player_id, now=None):
+    """The player's standing mute ({"until": unix time or None, "reason": text}), or None. An ended mute is dropped."""
+    mute = STATE.mutes.get(player_id)
+    if mute is None:
+        return None
+    until = mute.get("until")
+    if until is not None and until <= (time.time() if now is None else now):
+        STATE.mutes.pop(player_id, None)
+        return None
+    return mute
+
+
+def mute_notice(mute):
+    """What a muted player is told in their own chat window (the game has no muted reply or text of its own)."""
+    until = mute.get("until")
+    when = (
+        "until a moderator lifts it"
+        if until is None
+        else "until "
+        + datetime.fromtimestamp(until, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    )
+    why = f": {mute['reason']}" if mute.get("reason") else ""
+    return f"You are muted {when}{why}"
+
+
+def chat_note(text, sender="Moderator"):
+    """A line from the server in a chat window: a 0x2455 item from no one (from_id 0, chat_type 0 as the NPCs' lines)."""
+    return {
+        "from_id": 0,
+        "pname": sender,
+        "chat_type": 0,
+        "chat_str": clip_text(text, 512),
+    }
+
+
+def send_host_mail(player_id, title, body):
+    """A D-Mail from "Host" (id 0) to a player; an online player's bell rings."""
+    player = STATE.player(player_id)
+    if player is None:
+        return
+    STATE.mailboxes.setdefault(player_id, []).append(
+        {
+            "mail_id": STATE.next_mail_id,
+            "mail_type": 0,
+            "from_id": 0,
+            "from_name": "Host",
+            "to_id": player_id,
+            "to_name": player["pname"],
+            "title": title[:MAIL_TITLE_MAX],
+            "body": body[:MAIL_BODY_MAX],
+            "send_date": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+            "team_id": 0,
+            "team_name": "",
+        }
+    )
+    STATE.next_mail_id += 1
+    STATE.online_push(player_id, 0x2581)
+
+
+# --- The Information list: live news and the maintenance countdown ----------
+# 0x21FC {lang} whose items are {starttime, title, body}. The global dispatcher reads it whenever it arrives, so the
+# server may push it. A maintenance countdown is an entry of its own with `lefttime` (seconds) and `maintenance` (a
+# text): InfoIcon (0x44E130) keeps the soonest one for the maintenance icon. On cancellation, send an explicit
+# zero-time maintenance record before the refreshed Information list so the live client can process a clear event.
+
+MAINTENANCE = {
+    "at": None,
+    "message": "",
+}  # unix time the maintenance starts, and the text shown with it
+MAINTENANCE_CANCELLED = "Maintenance is cancelled."
+
+
+def maintenance_in(now=None):
+    """Seconds until a planned maintenance, or None when none is planned (or it has begun)."""
+    at = MAINTENANCE.get("at")
+    if at is None:
+        return None
+    left = int(at - (time.time() if now is None else now))
+    return left if left > 0 else None
+
+
+def information_items(now=None):
+    """The items of the Information list (0x21FC): the countdown if there is one, then the news."""
+    shown = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+    entries = []
+    left = maintenance_in(now)
+    if left is not None:
+        message = MAINTENANCE.get("message") or "Maintenance"
+        entries.append(
+            MessageRecord(
+                fields={
+                    "starttime": shown,
+                    "title": "Maintenance",
+                    "body": message,
+                    "lefttime": min(left, BP_LIMIT),
+                    "maintenance": message,
+                }
+            )
+        )
+    entries.extend(
+        MessageRecord(fields={"starttime": shown, "title": title, "body": body})
+        for title, body in WELCOME_NEWS
+    )
+    return [MessageRecord(fields={"lang": "1"}, items=entries)]
+
+
+def push_information():
+    """Sends everyone online the current Information list."""
+    items = information_items()
+    for player_id in list(STATE.online):
+        STATE.online_push(player_id, 0x21FC, items=items)
+
+
+def push_maintenance_cancel():
+    """Send a zero-time maintenance tombstone, then refresh the list to remove its icon live."""
+    shown = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+    cancel_item = MessageRecord(
+        fields={
+            "starttime": shown,
+            "title": "Maintenance",
+            "body": "",
+            "lefttime": 0,
+            "maintenance": "",
+        }
+    )
+    cancel_packet = [MessageRecord(fields={"lang": "1"}, items=[cancel_item])]
+    for player_id in list(STATE.online):
+        STATE.online_push(player_id, 0x21FC, items=cancel_packet)
+    # Follow with the authoritative list (fixed/custom announcements only).
+    push_information()
+
+
+def restore_hosting_settings():
+    """Restore optional host news after the permanent fixed login message."""
+    WELCOME_NEWS[:] = [("Announcement", LOGIN_SERVER_MESSAGE)]
+    if STATE.news:
+        WELCOME_NEWS.extend(
+            (str(title)[:64], str(body)[:512])
+            for title, body in STATE.news
+            if str(title).strip() or str(body).strip()
+        )
+
+
+# --- State backups ----------------------------------------------------------
+# Player-state backup creation is disabled by default. To re-enable it, set
+# `backups_enabled: true` in the config or YGO3_BACKUPS_ENABLED=1. This gates the
+# automatic and the manual backups. Restoring a backup always copies the current
+# state first (and refuses to restore if it cannot), enabled or not.
+
+BACKUP_DIR = DATA_DIR / "backups"
+BACKUPS_ENABLED = config_bool("backups_enabled", False, "YGO3_BACKUPS_ENABLED")
+AUTO_BACKUPS = BACKUPS_ENABLED and config_bool(
+    "auto_backups", True, "YGO3_AUTO_BACKUPS"
+)
+BACKUP_KEEP = config_int("backup_keep", 24, "YGO3_BACKUP_KEEP")
+BACKUP_INTERVAL = (
+    max(1, config_int("backup_interval_minutes", 60, "YGO3_BACKUP_INTERVAL")) * 60
+)
+
+
+def list_backups():
+    """The backup files, oldest first (the names start with their time)."""
+    if not BACKUP_DIR.is_dir():
+        return []
+    return sorted(BACKUP_DIR.glob(f"{STATE_FILE.stem}-*.pkl"))
+
+
+def make_backup(reason="manual", only_if_changed=False, force=False):
+    """Copies the state file into the backups folder. The new file, or None (no state file, nothing changed or a failure,
+    which is logged and never raised). `force` makes it with backups turned off: the safety copy before a restore.
+    """
+    if not BACKUPS_ENABLED and not force:
+        return None
+    try:
+        if not STATE_FILE.is_file():
+            return None
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        existing = list_backups()
+        if (
+            only_if_changed
+            and existing
+            and existing[-1].read_bytes() == STATE_FILE.read_bytes()
+        ):
+            return None
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        target = BACKUP_DIR / f"{STATE_FILE.stem}-{stamp}-{reason}.pkl"
+        counter = 1
+        while target.exists():
+            counter += 1
+            target = BACKUP_DIR / f"{STATE_FILE.stem}-{stamp}-{reason}-{counter}.pkl"
+        tmp = target.with_name(target.name + ".tmp")
+        shutil.copyfile(STATE_FILE, tmp)
+        os.replace(tmp, target)
+        if BACKUP_KEEP > 0:
+            for old in list_backups()[:-BACKUP_KEEP]:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+        log.info("[Backup] %s", target.name)
+        return target
+    except Exception:
+        log.exception("[Backup] Could not back up the state file")
+        return None
+
+
+async def backup_ticker():
+    """Backs the state file up every BACKUP_INTERVAL seconds when it changed (started by main)."""
+    while True:
+        await asyncio.sleep(BACKUP_INTERVAL)
+        make_backup("hourly", only_if_changed=True)
+
+
+# --- One server per data folder ---------------------------------------------
+# Two servers on the same data folder would overwrite each other's saves, so the second one is refused.
+
+DATA_LOCK_FILE = DATA_DIR / "ygo3_server.lock"
+_DATA_LOCK_HANDLE = None
+
+
+def _lock_handle(handle):
+    """Locks the open file without waiting; False when somebody else holds it."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _unlock_handle(handle):
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+def acquire_data_lock():
+    """Takes the data folder for this process until it exits; False when another server has it."""
+    global _DATA_LOCK_HANDLE
+    if _DATA_LOCK_HANDLE is not None:
+        return True
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    handle = open(DATA_LOCK_FILE, "a+b")
+    if not _lock_handle(handle):
+        handle.close()
+        return False
+    _DATA_LOCK_HANDLE = handle
+    return True
+
+
+def data_lock_busy():
+    """True when a server (this process or another) holds the data folder."""
+    if _DATA_LOCK_HANDLE is not None:
+        return True
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        handle = open(DATA_LOCK_FILE, "a+b")
+    except OSError:
+        return False
+    try:
+        if _lock_handle(handle):
+            _unlock_handle(handle)
+            return False
+        return True
+    finally:
+        handle.close()
+
+
+# --- The pages behind the game's links to Konami's old website ---------------
+# yugioh-online.net closed with the game in 2012. A connection DLL that rewrites those links sends them to the HTTP
+# port as /web/ plus the old path; each page says what this server has. /health answers "ok" for a monitor.
+# Each entry increments by +3.
+
+NPC_PLAYER_NAMES = {
+    1879048312: "Yami Yugi",
+    1879048315: "Seto Kaiba",
+    1879048318: "Joey Wheeler",
+    1879048321: "Mai Valentine",
+    1879048324: "Bandit Keith",
+    1879048327: "Maximillion Pegasus",
+    1879048330: "Yami Bakura",
+    1879048333: "Yami Marik",
+    1879048336: "Yugi Muto",
+    1879048339: "Jaden Yuki",
+    1879048342: "Chazz Princeton",
+    1879048345: "Alexis Rhodes",
+    1879048348: "Syrus Truesdale",
+    1879048351: "Hell Kaiser",
+    1879048354: "Vellian Crowler",
+    1879048357: "Aster Phoenix",
+    1879048360: "Jesse Andersen",
+    1879048363: "Yusei Fudo",
+    1879048366: "Jack Atlas",
+    1879048369: "Akiza Izinski",
+    1879048372: "Leo",
+    1879048375: "Luna",
+    1879048378: "Crow Hogan",
+    1879048381: "Carly Carmine",
+    1879048384: "Kalin Kessler",
+}
+
+
+def _public_player_name(player_id):
+    try:
+        numeric_id = int(player_id)
+    except (TypeError, ValueError):
+        numeric_id = None
+
+    if numeric_id is not None and numeric_id in NPC_PLAYER_NAMES:
+        return NPC_PLAYER_NAMES[numeric_id]
+
+    key = str(player_id).strip() if player_id is not None else ""
+    if key.isdigit() and int(key) in NPC_PLAYER_NAMES:
+        return NPC_PLAYER_NAMES[int(key)]
+
+    player = STATE.player(player_id) or {}
+    return str(player.get("pname") or f"Player {player_id}")
+
+
+def _resolve_replay_player_name(record, slot):
+    """Resolve player_1_name or player_2_name, falling back to player_1_id / player_2_id and NPC names."""
+    name_key = f"player_{slot}_name"
+    id_key = f"player_{slot}_id"
+
+    raw_name = str(record.get(name_key) or "").strip()
+    raw_id = record.get(id_key)
+
+    # Check if raw_name itself is a numeric NPC ID (e.g. "1879048312")
+    if raw_name.isdigit() and int(raw_name) in NPC_PLAYER_NAMES:
+        return NPC_PLAYER_NAMES[int(raw_name)]
+
+    # Check if player_<slot>_id is a known NPC ID
+    if raw_id is not None:
+        try:
+            npc_id = int(raw_id)
+            if npc_id in NPC_PLAYER_NAMES:
+                return NPC_PLAYER_NAMES[npc_id]
+        except (TypeError, ValueError):
+            pass
+
+    if raw_name:
+        return raw_name
+
+    if raw_id is not None:
+        return _public_player_name(raw_id)
+
+    return ""
+
+
+def _is_duelist_name(name_val):
+    return bool(re.match(r"^duelist$", str(name_val or "").strip(), re.IGNORECASE))
+
+
+def _flip_replay_result(result):
+    if result is None:
+        return result
+
+    s = str(result)
+    stripped = s.strip()
+
+    if re.match(r"^1-0$", stripped, re.IGNORECASE):
+        return "0-1"
+    if re.match(r"^0-1$", stripped, re.IGNORECASE):
+        return "1-0"
+    if re.match(r"^p1$", stripped, re.IGNORECASE):
+        return "p2"
+    if re.match(r"^p2$", stripped, re.IGNORECASE):
+        return "p1"
+
+    placeholder = "__REPLAY_SIDE_SWAP_TOKEN__"
+    swapped = re.sub(r"player[\s_]*1", placeholder, s, flags=re.IGNORECASE)
+    swapped = re.sub(r"player[\s_]*2", "Player 1", swapped, flags=re.IGNORECASE)
+    return swapped.replace(placeholder, "Player 2")
+
+
+def _normalize_replay_sides(record):
+    """Ensure Player 1 is the NPC/opponent and Player 2 is Duelist when Duelist is in slot 1."""
+    p1_name = _resolve_replay_player_name(record, 1)
+    p2_name = _resolve_replay_player_name(record, 2)
+
+    normalized = dict(record)
+    normalized["player_1_name"] = p1_name
+    normalized["player_2_name"] = p2_name
+
+    p1_is_duelist = _is_duelist_name(p1_name)
+    p2_is_duelist = _is_duelist_name(p2_name)
+
+    if p1_is_duelist and not p2_is_duelist:
+        normalized["player_1_id"], normalized["player_2_id"] = (
+            record.get("player_2_id"),
+            record.get("player_1_id"),
+        )
+        normalized["player_1_name"], normalized["player_2_name"] = p2_name, p1_name
+        if "result" in normalized:
+            normalized["result"] = _flip_replay_result(record.get("result"))
+
+    return normalized
+
+
+def _recordable(value, depth=0):
+    """Convert engine event data to bounded JSON/pickle-safe primitives."""
+    if depth > 8:
+        return str(value)[:160]
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value[:500] if isinstance(value, str) else value
+    if isinstance(value, bytes):
+        return {"bytes_hex": value[:256].hex(), "truncated": len(value) > 256}
+    if isinstance(value, dict):
+        return {
+            str(k)[:80]: _recordable(v, depth + 1) for k, v in list(value.items())[:80]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_recordable(v, depth + 1) for v in list(value)[:120]]
+    return str(value)[:240]
+
+
+def _pvp_result_totals():
+    """Results from player-vs-player matches only; NPC duels are practice."""
+    totals = {}
+    for duel in list(STATE.duel_records):
+        if duel.get("npc"):
+            continue
+        first = int(duel.get("player_1_id", 0))
+        second = int(duel.get("player_2_id", 0))
+        if first <= 0 or second <= 0:
+            continue
+        a = totals.setdefault(first, {"wins": 0, "losses": 0, "draws": 0})
+        b = totals.setdefault(second, {"wins": 0, "losses": 0, "draws": 0})
+        winner = duel.get("winner_id")
+        if winner is None:
+            a["draws"] += 1
+            b["draws"] += 1
+        elif int(winner) == first:
+            a["wins"] += 1
+            b["losses"] += 1
+        elif int(winner) == second:
+            b["wins"] += 1
+            a["losses"] += 1
+    return totals
+
+
+def _ranking_rate(row):
+    played = row["wins"] + row["losses"] + row["draws"]
+    return row["wins"] / played if played else 0.0
+
+
+def player_leaderboard(limit=50):
+    totals = _pvp_result_totals()
+    rows = []
+    for player_id, stats in totals.items():
+        player = STATE.player(player_id) or {}
+        rows.append(
+            {
+                "player_id": player_id,
+                "name": str(player.get("pname") or _public_player_name(player_id)),
+                **stats,
+                "duels": stats["wins"] + stats["losses"] + stats["draws"],
+                "win_rate": 100.0 * _ranking_rate(stats),
+            }
+        )
+    rows.sort(
+        key=lambda r: (
+            -r["wins"],
+            -r["ranking_rate(r)"],
+            r["losses"],
+            r["name"].lower(),
+        )
+    )
+    return rows[: max(1, min(int(limit), 100))]
+
+
+def team_leaderboard(limit=50):
+    totals = _pvp_result_totals()
+    rows = []
+    for team_id, team in list(STATE.teams.items()):
+        members = list(team.get("members", {}).keys())
+        aggregate = {"wins": 0, "losses": 0, "draws": 0}
+        for player_id in members:
+            stats = totals.get(int(player_id), {})
+            for key in aggregate:
+                aggregate[key] += int(stats.get(key, 0))
+        played = sum(aggregate.values())
+        if not played:
+            continue
+        rows.append(
+            {
+                "team_id": int(team_id),
+                "name": str(team.get("name") or f"Team {team_id}"),
+                "members": len(members),
+                **aggregate,
+                "duels": played,
+                "win_rate": 100.0 * _ranking_rate(aggregate),
+            }
+        )
+    rows.sort(
+        key=lambda r: (
+            -r["wins"],
+            -r["ranking_rate(r)"],
+            r["losses"],
+            r["name"].lower(),
+        )
+    )
+    return rows[: max(1, min(int(limit), 100))]
+
+
+def feature_api_payload(path):
+    """Return JSON-ready feature data. All rendering belongs to the desktop GUI."""
+    if path == "/api/features/packs":
+        items = []
+        if GAME.loaded:
+            for pack in sorted(GAME.packs, key=lambda item: (item.pack_type, item.id)):
+                tiers = []
+                for tier_index, tier in enumerate(pack.tiers):
+                    cards = []
+                    for row in tier:
+                        card = GAME.cards.get(row)
+                        if card:
+                            cards.append({"id": int(row), "name": str(card.name)})
+                    tiers.append(
+                        {
+                            "rarity": (
+                                "Common"
+                                if tier_index == 0
+                                else (
+                                    "Rare"
+                                    if tier_index == 1
+                                    else f"Tier {tier_index + 1}"
+                                )
+                            ),
+                            "cards": sorted(cards, key=lambda c: c["name"].lower()),
+                        }
+                    )
+                items.append(
+                    {
+                        "id": int(pack.id),
+                        "name": str(
+                            GAME.texts.get(pack.name_id, "")
+                            or f"Booster Pack {pack.id}"
+                        ),
+                        "description": str(
+                            GAME.texts.get(pack.description_id, "")
+                            if pack.description_id
+                            else ""
+                        ),
+                        "tiers": tiers,
+                        "unique_cards": len(
+                            {c["id"] for t in tiers for c in t["cards"]}
+                        ),
+                    }
+                )
+        return {"loaded": bool(GAME.loaded), "items": items}
+    if path == "/api/features/replays":
+        items = []
+        for record in reversed(list(STATE.duel_records)[-200:]):
+            normalized = _normalize_replay_sides(record)
+            entry = {
+                k: _recordable(normalized.get(k))
+                for k in ("id", "date", "player_1_name", "player_2_name", "result")
+            }
+            items.append(entry)
+        return {"items": items}
+    if path.startswith("/api/features/replays/"):
+        record_id = path.rsplit("/", 1)[-1]
+        record = next(
+            (r for r in list(STATE.duel_records) if str(r.get("id")) == record_id), None
+        )
+        if record is None:
+            return {"error": "Recording not found"}
+        normalized = _normalize_replay_sides(record)
+        return {"item": _recordable(normalized)}
+    return None
+
+
+# --- Operations (the control port and `--admin`) ------------------------------
+
+
+def admin_find_player(reference):
+    """A player by id or by name (ignoring case), or None."""
+    text = str(reference).strip()
+    if text.isdigit():
+        player = STATE.player(int(text))
+        if player is not None:
+            return player
+    lowered = text.lower()
+    for account in STATE.accounts.values():
+        for player in account.players:
+            if str(player.get("pname", "")).lower() == lowered:
+                return player
+    return None
+
+
+def _target(args, usage):
+    if not args:
+        raise ValueError(f"usage: {usage}")
+    player = admin_find_player(args[0])
+    if player is None:
+        raise ValueError(f"no player {args[0]!r} (give the player id or the name)")
+    return player
+
+
+def _whole(text, what):
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        raise ValueError(f"{what} must be a whole number, not {text!r}")
+
+
+def _admin_ping(args):
+    return "pong"
+
+
+def _admin_players(args):
+    rows = []
+    for player_id, session in sorted(
+        STATE.online.items(), key=lambda item: str(item[0])
+    ):
+        player = STATE.player(player_id)
+        name = player["pname"] if player else "?"
+        rows.append(
+            f"{player_id}\t{name}" + ("\t(muted)" if mute_of(player_id) else "")
+        )
+    return "\n".join(rows) if rows else "nobody is online"
+
+
+def _admin_codes(args):
+    if not STATE.bp_codes:
+        return "no BOOSTERPASS codes"
+    rows = []
+    for key, entry in STATE.bp_codes.items():
+        limit = (
+            "any number of players"
+            if entry["uses"] is None
+            else f"{entry['uses']} players"
+        )
+        rows.append(
+            f"{key}\t{entry['bp']} BP\tused by {len(entry['used_by'])} of {limit}"
+        )
+    return "\n".join(rows)
+
+
+def _admin_new_code(args):
+    if not args:
+        raise ValueError("usage: new-code BP [PLAYERS]")
+    bp = _whole(args[0], "BP")
+    uses = _whole(args[1], "PLAYERS") if len(args) > 1 else None
+    code = new_bp_code()
+    add_bp_code(code, bp, uses)
+    return f"{code}\t{bp} BP"
+
+
+def _admin_add_code(args):
+    if len(args) < 2:
+        raise ValueError("usage: add-code CODE BP [PLAYERS]")
+    bp = _whole(args[1], "BP")
+    uses = _whole(args[2], "PLAYERS") if len(args) > 2 else None
+    entry = add_bp_code(args[0], bp, uses)
+    return f"{entry['code']}\t{bp} BP"
+
+
+def _admin_remove_code(args):
+    if not args:
+        raise ValueError("usage: remove-code CODE")
+    remove_bp_code(args[0])
+    return f"removed {bp_code_key(args[0])}"
+
+
+def _admin_give_bp(args):
+    if not args:
+        raise ValueError("usage: give-bp AMOUNT [USER_ID]")
+    amount = _whole(args[0], "AMOUNT")
+    user_id = _whole(args[1], "USER_ID") if len(args) > 1 else USER_ID
+    account = STATE.get_account(
+        user_id
+    )  # as --grant-bp always did: the account is made when it is the first use
+    before = account.duel_points
+    account.duel_points = min(BP_LIMIT, max(0, int(before) + amount))
+    try:
+        STATE.save()
+    except Exception as exc:
+        account.duel_points = before
+        raise ValueError(f"the change was not saved: {exc}")
+    if amount > 0:
+        # The balance is saved; the D-Mail that tells the players is a courtesy, so a failed save of it is only logged.
+        for player in account.players:
+            send_host_mail(
+                player["player_id"],
+                "BP gift",
+                f"The host gave you {amount} BP: {account.duel_points} BP now.",
+            )
+        try:
+            STATE.save()
+        except Exception:
+            log.exception("[Admin] Could not save the D-Mail about the BP gift")
+    return f"gave {amount} BP to account {user_id}: {account.duel_points} BP now"
+
+
+def _admin_mute(args):
+    player = _target(args, "mute PLAYER [MINUTES] [REASON...]")
+    rest = args[1:]
+    minutes = None
+    if rest and rest[0].isdigit():
+        minutes = int(rest[0])
+        rest = rest[1:]
+    reason = " ".join(rest).strip()[:100]
+    until = int(time.time()) + minutes * 60 if minutes else None
+    player_id = player["player_id"]
+    before = STATE.mutes.get(player_id)
+    STATE.mutes[player_id] = {"until": until, "reason": reason}
+    try:
+        STATE.save()
+    except Exception as exc:
+        if before is None:
+            STATE.mutes.pop(player_id, None)
+        else:
+            STATE.mutes[player_id] = before
+        raise ValueError(f"the change was not saved: {exc}")
+    STATE.online_push(
+        player_id, 0x2455, items=[chat_note(mute_notice(STATE.mutes[player_id]))]
+    )
+    return f"muted {player['pname']} " + (
+        f"for {minutes} minutes" if minutes else "until unmuted"
+    )
+
+
+def _admin_unmute(args):
+    player = _target(args, "unmute PLAYER")
+    player_id = player["player_id"]
+    mute = STATE.mutes.pop(player_id, None)
+    if mute is None:
+        raise ValueError(f"{player['pname']} is not muted")
+    try:
+        STATE.save()
+    except Exception as exc:
+        STATE.mutes[player_id] = mute
+        raise ValueError(f"the change was not saved: {exc}")
+    STATE.online_push(player_id, 0x2455, items=[chat_note("You are no longer muted.")])
+    return f"unmuted {player['pname']}"
+
+
+def _admin_mutes(args):
+    rows = []
+    for player_id in list(STATE.mutes):
+        mute = mute_of(player_id)
+        player = STATE.player(player_id)
+        if mute is not None:
+            rows.append(
+                f"{player_id}\t{player['pname'] if player else '?'}\t{mute_notice(mute)}"
+            )
+    return "\n".join(rows) if rows else "nobody is muted"
+
+
+def _admin_kick(args):
+    player = _target(args, "kick PLAYER")
+    session = STATE.online.get(player["player_id"])
+    if session is None:
+        raise ValueError(f"{player['pname']} is not online")
+    # The client shows its own disconnect dialog; the session cleans up as for any dropped connection.
+    session.writer.close()
+    return f"kicked {player['pname']}"
+
+
+def _admin_say(args):
+    if not args:
+        raise ValueError("usage: say TEXT...")
+    line = chat_note(" ".join(args), "Host")
+    online = list(STATE.online)
+    for player_id in online:
+        STATE.online_push(player_id, 0x2455, items=[dict(line)])
+    return f"said it to {len(online)} players"
+
+
+def _admin_news(args):
+    if len(args) < 2:
+        raise ValueError(
+            "usage: news TITLE BODY...  (quote the title if it has spaces)"
+        )
+    # Keep the built-in login message at index 0; GUI/admin news is always second.
+    custom = [(args[0][:64], " ".join(args[1:])[:512])]
+    previous = list(WELCOME_NEWS)
+    previous_saved = STATE.news
+    WELCOME_NEWS[:] = [("Announcement", LOGIN_SERVER_MESSAGE), *custom]
+    STATE.news = custom
+    try:
+        STATE.save()
+    except Exception as exc:
+        WELCOME_NEWS[:] = previous
+        STATE.news = previous_saved
+        raise ValueError(f"the change was not saved: {exc}")
+    push_information()
+    return (
+        f"the custom message is now shown after the fixed login message: {custom[0][0]}"
+    )
+
+
+def _admin_news_clear(args):
+    previous = list(WELCOME_NEWS)
+    previous_saved = STATE.news
+    WELCOME_NEWS[:] = [("Announcement", LOGIN_SERVER_MESSAGE)]
+    STATE.news = []
+    try:
+        STATE.save()
+    except Exception as exc:
+        WELCOME_NEWS[:] = previous
+        STATE.news = previous_saved
+        raise ValueError(f"the change was not saved: {exc}")
+    push_information()
+    return "the custom message is cleared; the fixed login message remains"
+
+
+def _admin_maintenance(args):
+    if not args:
+        raise ValueError("usage: maintenance MINUTES [MESSAGE...]")
+    minutes = _whole(args[0], "MINUTES")
+    if minutes < 1:
+        raise ValueError("MINUTES is at least 1")
+    MAINTENANCE["at"] = time.time() + minutes * 60
+    MAINTENANCE["message"] = " ".join(args[1:])[:200]
+    push_information()
+    return f"maintenance is announced in {minutes} minutes (the game counts down; the server stays up)"
+
+
+def _admin_maintenance_off(args):
+    if maintenance_in() is None:
+        raise ValueError("no maintenance is planned")
+    MAINTENANCE["at"] = None
+    push_maintenance_cancel()
+    for player_id in list(STATE.online):
+        STATE.online_push(
+            player_id, 0x2455, items=[chat_note(MAINTENANCE_CANCELLED, "Host")]
+        )
+    return "maintenance is called off"
+
+
+def _admin_backup(args):
+    if not BACKUPS_ENABLED:
+        raise ValueError(
+            "backups are turned off: set backups_enabled to true in the launcher configuration and restart the server"
+        )
+    target = make_backup("manual")
+    if target is None:
+        raise ValueError("nothing was backed up (see the server log)")
+    return target.name
+
+
+def _admin_backups(args):
+    names = [path.name for path in list_backups()]
+    return "\n".join(names) if names else "no backups"
+
+
+def _admin_restore_backup(args):
+    if not args:
+        raise ValueError("usage: restore-backup NAME  (see: backups)")
+    if data_lock_busy():
+        raise ValueError(
+            "stop the server first: it would overwrite the restored file at its next save"
+        )
+    source = BACKUP_DIR / Path(args[0]).name
+    if not source.is_file():
+        raise ValueError(f"no backup {Path(args[0]).name}")
+    if not ServerStore.read_or_keep(source, "backup"):
+        raise ValueError("that backup cannot be read")
+    # Read it first: the safety copy below may prune the oldest backup, which could be this very file.
+    data = source.read_bytes()
+    if STATE_FILE.is_file() and make_backup("before-restore", force=True) is None:
+        raise ValueError(
+            "could not make a safety copy of the current state (see the server log): nothing was restored"
+        )
+    tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, STATE_FILE)
+    return f"restored {source.name}; start the server again"
+
+
+ADMIN_OPS = {
+    "ping": _admin_ping,
+    "players": _admin_players,
+    "codes": _admin_codes,
+    "new-code": _admin_new_code,
+    "add-code": _admin_add_code,
+    "remove-code": _admin_remove_code,
+    "give-bp": _admin_give_bp,
+    "mute": _admin_mute,
+    "unmute": _admin_unmute,
+    "mutes": _admin_mutes,
+    "kick": _admin_kick,
+    "say": _admin_say,
+    "news": _admin_news,
+    "news-clear": _admin_news_clear,
+    "maintenance": _admin_maintenance,
+    "maintenance-off": _admin_maintenance_off,
+    "backup": _admin_backup,
+    "backups": _admin_backups,
+    "restore-backup": _admin_restore_backup,
+}
+
+# What only changes saved data can also be done on the state file while no server runs; the rest needs the live server
+# (players online, the news and countdown they see) or, for restore-backup, no server at all.
+ADMIN_OFFLINE_OPS = {
+    "codes",
+    "new-code",
+    "add-code",
+    "remove-code",
+    "mute",
+    "unmute",
+    "mutes",
+    "news",
+    "news-clear",
+    "backup",
+    "backups",
+}
+ADMIN_STOPPED_ONLY_OPS = {"restore-backup"}
+
+ADMIN_HELP = """Operations (python ygo3_server.py --admin OPERATION [ARGUMENTS]):
+  players                        who is online
+  codes                          the BOOSTERPASS codes and who used them
+  new-code BP [PLAYERS]          makes a random code worth BP, for a number of players (any number if left out)
+  add-code CODE BP [PLAYERS]     makes a code you choose (16 letters and digits)
+  remove-code CODE
+  give-bp AMOUNT [USER_ID]       gives BP (a D-Mail from Host tells the players)
+  mute PLAYER [MINUTES] [REASON...]   silences a player's chat and D-Mail (until unmuted without MINUTES)
+  unmute PLAYER
+  mutes                          who is muted
+  kick PLAYER                    drops a player's connection (needs the live server)
+  say TEXT...                    a line from Host in everybody's chat (needs the live server)
+  news TITLE BODY...             sets a custom message after the fixed login message
+  news-clear                     removes only the custom message; fixed message remains
+  maintenance MINUTES [MESSAGE...]   starts the game's maintenance countdown (needs the live server)
+  maintenance-off                calls it off (needs the live server)
+  backup                         copies the state file into data/backups now
+  backups                        lists the backups
+  restore-backup NAME            puts a backup back (the server must be stopped)
+PLAYER is a player id or a name. Operations run on the live server through its control port when it is up."""
+
+
+def admin_execute(op, args):
+    """Runs one operation on this process's state; returns its text. ValueError carries a refusal."""
+    handler = ADMIN_OPS.get(op)
+    if handler is None:
+        raise ValueError(f"unknown operation {op!r}; try: help")
+    return handler([str(arg) for arg in args])
+
+
+# --- The control port --------------------------------------------------------
+# A line of JSON {"token", "op", "args"} in, a line {"ok", "message"} out.
+# The host and port are required in ygo3_launcher_config.json.
+# The token is stored in data/ygo3_admin_token.txt.
+# Set admin_port to 0 to disable the control port.
+
+ADMIN_HOST = str(config_required("admin_host")).strip()
+ADMIN_PORT = config_required_int("admin_port")
+
+if not ADMIN_HOST:
+    raise ValueError("admin_host must not be empty.")
+
+if not 0 <= ADMIN_PORT <= 65535:
+    raise ValueError("admin_port must be between 0 and 65535.")
+
+ADMIN_TOKEN_FILE = DATA_DIR / "ygo3_admin_token.txt"
+
+
+def admin_token():
+    """The control port's token, made on first use."""
+    try:
+        token = ADMIN_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        token = ""
+    if not token:
+        token = secrets.token_hex(24)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        ADMIN_TOKEN_FILE.write_text(token, encoding="utf-8")
+        try:
+            os.chmod(ADMIN_TOKEN_FILE, 0o600)
+        except OSError:
+            pass
+    return token
+
+
+async def admin_client(reader, writer):
+    result = {"ok": False, "message": "bad request"}
+    try:
+        peer = writer.get_extra_info("peername")
+        if not peer or peer[0] not in ("127.0.0.1", "::1"):
+            return
+        line = await asyncio.wait_for(reader.readline(), timeout=5)
+        request = json.loads(line.decode("utf-8"))
+        if not isinstance(request, dict):
+            raise ValueError("bad request")
+        if not secrets.compare_digest(str(request.get("token", "")), admin_token()):
+            result = {"ok": False, "message": "wrong token"}
+        else:
+            args = request.get("args") or []
+            if not isinstance(args, list):
+                raise ValueError("bad request")
+            try:
+                result = {
+                    "ok": True,
+                    "message": admin_execute(str(request.get("op", "")), args),
+                }
+            except ValueError as exc:
+                result = {"ok": False, "message": str(exc)}
+            except Exception:
+                log.exception("[Admin] Operation failed")
+                result = {
+                    "ok": False,
+                    "message": "the operation failed; see the server log",
+                }
+    except (asyncio.TimeoutError, ValueError, UnicodeDecodeError):
+        pass
+    except Exception:
+        log.exception("[Admin] Error handling %s", writer.get_extra_info("peername"))
+    finally:
+        try:
+            writer.write(json.dumps(result).encode("utf-8") + b"\n")
+            await writer.drain()
+        except Exception:
+            pass
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (ConnectionError, OSError):
+            pass
+
+
+async def start_admin_server():
+    """Opens the control port; the server, or None when it is off or its port is taken."""
+    if ADMIN_PORT <= 0:
+        log.info("Admin: control port off")
+        return None
+    admin_token()
+    try:
+        server = await asyncio.start_server(admin_client, ADMIN_HOST, ADMIN_PORT)
+    except OSError as exc:
+        log.warning(
+            "Admin: the control port %s:%d could not open: %s",
+            ADMIN_HOST,
+            ADMIN_PORT,
+            exc,
+        )
+        return None
+    log.info("Admin: %s:%d (token in %s)", ADMIN_HOST, ADMIN_PORT, ADMIN_TOKEN_FILE)
+    return server
+
+
+def admin_request(op, args=None, timeout=5):
+    """Sends one operation to the running server's control port. Its answer, or None when nothing answers there."""
+    if ADMIN_PORT <= 0:
+        return None
+    try:
+        with socket.create_connection(
+            (ADMIN_HOST, ADMIN_PORT), timeout=timeout
+        ) as connection:
+            connection.sendall(
+                json.dumps(
+                    {"token": admin_token(), "op": op, "args": list(args or [])}
+                ).encode("utf-8")
+                + b"\n"
+            )
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = connection.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+        answer = json.loads(data.decode("utf-8"))
+        return answer if isinstance(answer, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def admin_cli(op, args):
+    """`--admin OPERATION [ARGUMENTS]`: the exit code. Uses the live server when there is one."""
+    if op == "help":
+        print(ADMIN_HELP)
+        return 0
+    if op not in ADMIN_OPS:
+        print(f"Unknown operation {op!r}.\n\n{ADMIN_HELP}")
+        return 1
+    if op in ADMIN_STOPPED_ONLY_OPS:
+        answer = None
+    else:
+        answer = admin_request(op, args)
+    if answer is None:
+        if op not in ADMIN_OFFLINE_OPS and op not in ADMIN_STOPPED_ONLY_OPS:
+            print(
+                "The server is not running (or its control port is off): this operation needs it live."
+            )
+            return 1
+        if op not in ADMIN_STOPPED_ONLY_OPS and data_lock_busy():
+            print(
+                "A server is using the data folder but its control port did not answer "
+                "(admin_port is 0, or another program has the port). Changing the files now would be overwritten."
+            )
+            return 1
+        try:
+            answer = {"ok": True, "message": admin_execute(op, args)}
+        except ValueError as exc:
+            answer = {"ok": False, "message": str(exc)}
+    print(answer.get("message", ""))
+    return 0 if answer.get("ok") else 1
+
+
 async def send_http(
     writer, status, body, content_type="text/plain", content_length=None
 ):
@@ -12005,6 +13938,30 @@ async def http_client(reader, writer):
             return
 
         path = unquote(urlsplit(target).path)
+        if path == "/health":
+            page = b"ok\n"
+            await send_http(
+                writer,
+                "200 OK",
+                b"" if method == "HEAD" else page,
+                "text/plain",
+                content_length=len(page),
+            )
+            return
+        if path.startswith("/api/features/"):
+            payload = feature_api_payload(path)
+            if payload is None:
+                await send_http(writer, "404 Not Found", b"Not found")
+                return
+            page = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+            await send_http(
+                writer,
+                "200 OK",
+                b"" if method == "HEAD" else page,
+                "application/json; charset=utf-8",
+                content_length=len(page),
+            )
+            return
         if not path.startswith(("/ygo3/", "/ygoda/patch/", "/app/")):
             await send_http(writer, "404 Not Found", b"Not found")
             return
@@ -12044,9 +14001,22 @@ async def http_client(reader, writer):
 async def main():
     global DUEL_ENGINE, DUEL_MANAGER, FRONT_MATCHMAKER
 
+    if not acquire_data_lock():
+        log.error(
+            "Another server is already using the data folder %s: stop it first.",
+            DATA_DIR,
+        )
+        raise SystemExit(1)
+
     init_game_data()
     servers = []
     ticker = None
+    maintenance_task = None
+    backup_task = None
+    admin_server = None
+    restore_hosting_settings()
+    if AUTO_BACKUPS:
+        make_backup("start")
 
     try:
         if GAME.loaded:
@@ -12111,6 +14081,12 @@ async def main():
         log.info("======================================")
 
         ticker = asyncio.create_task(rental_ticker())  # ends rentals at their term
+        maintenance_task = asyncio.create_task(maintenance_ticker())
+        if AUTO_BACKUPS:
+            backup_task = asyncio.create_task(
+                backup_ticker()
+            )  # backs the state file up while it changes
+        admin_server = await start_admin_server()  # the local control port (--admin)
         async with gate, front, duel, http:
             await asyncio.gather(
                 gate.serve_forever(),
@@ -12122,6 +14098,12 @@ async def main():
     finally:
         if ticker is not None:
             ticker.cancel()
+        if maintenance_task is not None:
+            maintenance_task.cancel()
+        if backup_task is not None:
+            backup_task.cancel()
+        if admin_server is not None:
+            admin_server.close()
         for server in servers:
             server.close()
 
@@ -12151,6 +14133,9 @@ async def main():
             STATE.save()
         except Exception:
             log.exception("Failed to save server state")
+
+        if AUTO_BACKUPS:
+            make_backup("stop")
 
 
 # Reads the values after a CLI flag, exiting with usage if too few.
@@ -12223,6 +14208,10 @@ if __name__ == "__main__":
             amount = int(values[0])
             user_id = int(values[1]) if len(values) > 1 else USER_ID
 
+            if admin_request("ping") is not None:
+                # A server is running: it would overwrite this change at its next save, so it makes the grant.
+                raise SystemExit(admin_cli("give-bp", [str(amount), str(user_id)]))
+
             account = STATE.get_account(user_id)
             account.duel_points = max(0, int(account.duel_points) + amount)
             STATE.save()
@@ -12240,6 +14229,12 @@ if __name__ == "__main__":
             2,
             "--grant-card PLAYER_ID ROW [QUANTITY]",
         )
+
+        if data_lock_busy():
+            print(
+                "A server is running on this data folder: it would overwrite this change. Stop it first."
+            )
+            raise SystemExit(1)
 
         require_game_data()
 
@@ -12347,6 +14342,15 @@ if __name__ == "__main__":
                 f"x{count}",
                 sep="\t",
             )
+
+    elif "--admin" in sys.argv:
+        values = cli_values(
+            "--admin",
+            1,
+            "--admin OPERATION [ARGUMENTS]   (python game_server.py --admin help lists them)",
+        )
+
+        raise SystemExit(admin_cli(values[0], values[1:]))
 
     else:
         try:
